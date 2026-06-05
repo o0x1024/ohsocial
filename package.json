@@ -1,6 +1,6 @@
 {
   "name": "ohsocial",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "自媒体运营工具 — AI 驱动的选题、创作、排期",
   "main": "./out/main/index.js",
@@ -10,7 +10,7 @@
     "preview": "electron-vite preview",
     "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps",
     "icons": "node scripts/generate-icons.mjs",
-    "pack:mac": "npm run icons && electron-vite build && electron-builder --mac",
+    "pack:mac": "npm run icons && electron-vite build && electron-builder --mac && node scripts/sign-mac-app.mjs",
     "pack:win": "npm run icons && electron-vite build && electron-builder --win"
   },
   "dependencies": {
@@ -71,10 +71,17 @@
       "package.json"
     ],
     "asar": true,
+    "asarUnpack": [
+      "**/*.node",
+      "**/better-sqlite3/**"
+    ],
     "icon": "build/icon.png",
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "build/icon.icns",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
       "target": [
         "dmg",
         "zip"

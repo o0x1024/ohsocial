@@ -53,6 +53,19 @@ npm run pack:mac
 npm run pack:win
 ```
 
+## macOS 安装说明
+
+Release 包为 ad-hoc 签名（无 Apple 开发者证书），首次打开若提示「已损坏」：
+
+1. 将 `OhSocial.app` 拖入「应用程序」文件夹
+2. 在终端执行（替换为实际路径）：
+
+```bash
+xattr -cr /Applications/OhSocial.app
+```
+
+3. 或在「系统设置 → 隐私与安全性」中点击「仍要打开」
+
 ## 许可证
 
 Private
