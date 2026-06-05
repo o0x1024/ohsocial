@@ -7,11 +7,14 @@ node_modules/
 out/
 dist/
 release/
+build/icon.iconset
+build/icon-*.png
 *.tsbuildinfo
 
 # IDE
 .vscode/
 !.vscode/extensions.json
+!.vscode/launch.json
 .idea/
 *.swp
 *.swo

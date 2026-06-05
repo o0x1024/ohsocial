@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="OhSocial">
+  <defs>
+    <linearGradient id="bg" x1="96" y1="64" x2="928" y2="960" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4338ca"/>
+      <stop offset="0.5" stop-color="#6d28d9"/>
+      <stop offset="1" stop-color="#a21caf"/>
+    </linearGradient>
+  </defs>
+  <!-- macOS 图标安全区：约 9% 边距，与系统应用视觉尺寸一致 -->
+  <g transform="translate(512 512) scale(0.82) translate(-512 -512)">
+    <rect width="1024" height="1024" rx="230" fill="url(#bg)"/>
+    <circle cx="512" cy="512" r="248" fill="none" stroke="#ffffff" stroke-width="88"/>
+    <circle cx="512" cy="512" r="72" fill="#ffffff"/>
+    <circle cx="512" cy="264" r="44" fill="#e9d5ff"/>
+    <circle cx="760" cy="512" r="44" fill="#e9d5ff"/>
+    <circle cx="512" cy="760" r="44" fill="#e9d5ff"/>
+    <circle cx="264" cy="512" r="44" fill="#e9d5ff"/>
+    <path fill="#fde68a" d="M724 172l28 72 76 28-76 28-28 72-28-72-76-28 76-28 28-72z"/>
+  </g>
+</svg>

@@ -1,0 +1,69 @@
+{
+  "name": "ohsocial",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "自媒体运营工具 — AI 驱动的选题、创作、排期",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "postinstall": "node node_modules/electron/install.js && electron-builder install-app-deps",
+    "icons": "node scripts/generate-icons.mjs",
+    "pack:mac": "npm run icons && electron-vite build && electron-builder --mac",
+    "pack:win": "npm run icons && electron-vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "better-sqlite3": "^11.7.0"
+  },
+  "devDependencies": {
+    "@fortawesome/fontawesome-svg-core": "^7.2.0",
+    "@fortawesome/free-solid-svg-icons": "^7.2.0",
+    "@fortawesome/vue-fontawesome": "^3.2.0",
+    "@tiptap/starter-kit": "^2.11.2",
+    "@tiptap/vue-3": "^2.11.2",
+    "@types/better-sqlite3": "^7.6.13",
+    "@vitejs/plugin-vue": "^5.2.1",
+    "autoprefixer": "^10.4.20",
+    "daisyui": "^5.5.20",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
+    "electron-vite": "^4.0.0",
+    "pinia": "^2.3.0",
+    "postcss": "^8.4.49",
+    "sharp": "^0.33.5",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vue": "^3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "build": {
+    "appId": "com.ohsocial.app",
+    "productName": "OhSocial",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "icon": "build/icon.png",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    }
+  }
+}
