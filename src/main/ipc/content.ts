@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import type { ContentCreateInput, ContentUpdateInput } from '../../shared/types/content'
+import { resolveContentPlatformIds } from '../../shared/content-platform'
 import { contentDAO, platformAccountDAO, topicDAO, writingStyleDAO } from '../db'
 import { modelService } from '../ai/model-service'
 import { runWithAiProgress } from './ai-progress-runner'
@@ -9,6 +10,15 @@ function streamCallbacks(
   legacy: Record<string, unknown>
 ) {
   return { progress, deltaLegacy: legacy, signal: progress?.signal }
+}
+
+function platformIdsForContent(content: NonNullable<ReturnType<typeof contentDAO.getById>>): string[] {
+  const topic = content.topicId ? topicDAO.getById(content.topicId) : undefined
+  return resolveContentPlatformIds({
+    platform: content.platform,
+    meta: content.meta,
+    topicTargetPlatforms: topic?.targetPlatforms
+  })
 }
 
 export interface ContentListFilter {
@@ -148,14 +158,24 @@ export function registerContentHandlers(): void {
         }
         const writingStyleId =
           typeof content.meta?.writingStyleId === 'number' ? content.meta.writingStyleId : null
-        return modelService.generateWriting(
+        const platformIds = platformIdsForContent(content)
+        const result = await modelService.generateWriting(
           content.title,
           brief,
           streamCallbacks(progress, { contentId, mode: 'generate' }),
-          writingStyleId
+          writingStyleId,
+          platformIds
         )
+        return {
+          success: result.success,
+          content: result.content,
+          error: result.error
+        }
       },
-      r => ({ success: r.success, error: r.error })
+      r => ({
+        success: Boolean(r?.success),
+        error: r?.error
+      })
     )
   )
 
@@ -170,15 +190,24 @@ export function registerContentHandlers(): void {
           if (!content) return { success: false, error: '内容不存在' }
           const writingStyleId =
             typeof content.meta?.writingStyleId === 'number' ? content.meta.writingStyleId : null
+          const platformIds = platformIdsForContent(content)
           return modelService.rewriteSelection(
             content.title,
             selectedText,
             instruction,
             streamCallbacks(progress, { contentId, mode: 'rewrite' }),
-            writingStyleId
-          )
+            writingStyleId,
+            platformIds
+          ).then(result => ({
+            success: result.success,
+            content: result.content,
+            error: result.error
+          }))
         },
-        r => ({ success: r.success, error: r.error })
+        r => ({
+          success: Boolean(r?.success),
+          error: r?.error
+        })
       )
   )
 }

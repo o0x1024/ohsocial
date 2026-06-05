@@ -1,3 +1,6 @@
+<script lang="ts">
+export default { name: 'ContentEditor' }
+</script>
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -8,6 +11,9 @@ import type { Content } from '../../../../shared/types/content'
 import type { WritingStyle } from '../../../../shared/types/writing-style'
 import type { EditorComment } from '../../../../shared/types/editor'
 import { CONTENT_STATUS_LABELS } from '../../../../shared/constants/platforms'
+import { resolveContentPlatformIds } from '../../../../shared/content-platform'
+import type { PlatformAccount } from '../../../../shared/types/platform-account'
+import type { Topic } from '../../../../shared/types/topic'
 import { usePlatformList } from '../../composables/usePlatformList'
 import { diffLines, stripHtml } from '../../../../shared/text-diff'
 
@@ -31,8 +37,10 @@ const writingStyles = ref<WritingStyle[]>([])
 const writingStyleId = ref<number | ''>('')
 const editorComments = ref<EditorComment[]>([])
 const lastVersionBody = ref('')
+const platformAccounts = ref<PlatformAccount[]>([])
+const linkedTopic = ref<Topic | null>(null)
 
-const { contentText: aiContentText } = useAiProgress()
+const { contentText: aiContentText, thinkingText: aiThinkingText } = useAiProgress()
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let deltaHandler: ((...args: unknown[]) => void) | null = null
@@ -66,6 +74,9 @@ async function load() {
   writingStyleId.value = typeof boundId === 'number' ? boundId : ''
   const rawComments = content.value.meta?.comments
   editorComments.value = Array.isArray(rawComments) ? (rawComments as EditorComment[]) : []
+  linkedTopic.value = content.value.topicId
+    ? ((await window.ohsocial.invoke('topic:get', content.value.topicId)) as Topic | undefined) ?? null
+    : null
   const originId = content.value.parentId ?? content.value.id
   versions.value = (await window.ohsocial.invoke('content:list-versions', originId)) as Content[]
   await loadVersionBaseline()
@@ -74,14 +85,14 @@ async function load() {
 async function save() {
   if (!content.value) return
   saving.value = true
-  const meta = { ...(content.value.meta ?? {}) }
+  const meta = JSON.parse(JSON.stringify(content.value.meta ?? {})) as Record<string, unknown>
   if (writingStyleId.value) {
     meta.writingStyleId = Number(writingStyleId.value)
   } else {
     delete meta.writingStyleId
   }
   if (editorComments.value.length) {
-    meta.comments = editorComments.value
+    meta.comments = JSON.parse(JSON.stringify(editorComments.value))
   } else {
     delete meta.comments
   }
@@ -108,6 +119,29 @@ const boundStyleName = computed(() => {
   return writingStyles.value.find(s => s.id === writingStyleId.value)?.name ?? ''
 })
 
+const boundPersonaHint = computed(() => {
+  if (!content.value) return ''
+  const platformIds = resolveContentPlatformIds({
+    platform: content.value.platform,
+    meta: content.value.meta,
+    topicTargetPlatforms: linkedTopic.value?.targetPlatforms
+  })
+  const platformId = platformIds[0]
+  if (!platformId) return ''
+  const persona = platformAccounts.value.find(a => a.platform === platformId)?.authorPersona?.trim()
+  if (!persona) return ''
+  return `${platformLabel(platformId)} · ${persona}`
+})
+
+const showMissingPersonaHint = computed(() => {
+  if (!content.value || boundPersonaHint.value) return false
+  return resolveContentPlatformIds({
+    platform: content.value.platform,
+    meta: content.value.meta,
+    topicTargetPlatforms: linkedTopic.value?.targetPlatforms
+  }).length > 0
+})
+
 function applyGeneratedBody(raw: string) {
   const html = toEditorHtml(raw)
   if (!html || html === '<p></p>') return false
@@ -122,14 +156,20 @@ async function aiGenerate() {
   aiLoading.value = true
   streamingToEditor = true
   aiStream.value = ''
-  await save()
   try {
+    await save()
     const result = (await window.ohsocial.invoke('content:ai-generate', contentId.value)) as {
       success?: boolean
       content?: string
       error?: string
     } | undefined
-    const raw = (result?.content || aiContentText.value || aiStream.value || '').trim()
+    const raw = (
+      result?.content ||
+      aiContentText.value ||
+      aiStream.value ||
+      aiThinkingText.value ||
+      ''
+    ).trim()
     if (raw && applyGeneratedBody(raw)) {
       if (saveTimer) clearTimeout(saveTimer)
       await save()
@@ -140,6 +180,8 @@ async function aiGenerate() {
     } else {
       alert('模型未返回正文内容')
     }
+  } catch (err: unknown) {
+    alert(err instanceof Error ? err.message : 'AI 生成失败')
   } finally {
     aiLoading.value = false
     streamingToEditor = false
@@ -220,9 +262,17 @@ onMounted(async () => {
   const list = await loadPlatforms()
   if (list.length && !adaptPlatform.value) adaptPlatform.value = list[0].id
   hasModel.value = (await window.ohsocial.invoke('model:hasEnabled')) as boolean
+  platformAccounts.value = (await window.ohsocial.invoke('account:list')) as PlatformAccount[]
   deltaHandler = (payload: unknown) => {
     const p = payload as { contentId?: number; delta?: string; kind?: string }
-    if (p.contentId !== contentId.value || !p.delta || p.kind === 'thinking') return
+    if (p.contentId !== contentId.value || !p.delta) return
+    if (p.kind === 'thinking') {
+      if (streamingToEditor) {
+        aiStream.value += p.delta
+        body.value = toEditorHtml(aiStream.value)
+      }
+      return
+    }
     aiStream.value += p.delta
     if (streamingToEditor) {
       body.value = toEditorHtml(aiStream.value)
@@ -285,6 +335,12 @@ onUnmounted(() => {
     <div class="flex-1 overflow-y-auto p-6 min-h-0 flex flex-col">
       <p v-if="boundStyleName" class="text-xs text-primary mb-2 shrink-0">
         当前文风：{{ boundStyleName }} · AI 生成将按此文风代笔
+      </p>
+      <p v-if="boundPersonaHint" class="text-xs text-secondary mb-2 shrink-0">
+        创作人设：{{ boundPersonaHint }} · AI 生成将代入此人设
+      </p>
+      <p v-else-if="showMissingPersonaHint" class="text-xs text-base-content/45 mb-2 shrink-0">
+        未配置创作人设，可在设置 → 运营配置中为对应平台填写
       </p>
       <RichTextEditor
         v-model="body"

@@ -89,6 +89,7 @@ library.add(
 )
 
 import { initAiProgressBridge } from './composables/useAiProgress'
+import { rememberNavPath } from './composables/useNavMemory'
 import { initAppearanceSettings } from './services/appearanceSettings'
 import App from './App.vue'
 import router from './router'
@@ -96,6 +97,10 @@ import './assets/main.css'
 
 initAppearanceSettings()
 initAiProgressBridge()
+
+router.afterEach(to => {
+  rememberNavPath(to.path)
+})
 
 const app = createApp(App)
 app.component('FontAwesomeIcon', FontAwesomeIcon)

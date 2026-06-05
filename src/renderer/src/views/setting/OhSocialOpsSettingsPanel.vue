@@ -13,6 +13,7 @@ type AccountFields = {
   contentDomain: string
   contentKeywordsText: string
   contentBrief: string
+  authorPersona: string
 }
 
 function emptyAccount(displayName = ''): AccountFields {
@@ -24,7 +25,8 @@ function emptyAccount(displayName = ''): AccountFields {
     notes: '',
     contentDomain: '',
     contentKeywordsText: '',
-    contentBrief: ''
+    contentBrief: '',
+    authorPersona: ''
   }
 }
 
@@ -49,7 +51,8 @@ function syncFormFromAccounts(accounts: PlatformAccount[]) {
       notes: acc.notes,
       contentDomain: acc.contentDomain,
       contentKeywordsText: (acc.contentKeywords ?? []).join('、'),
-      contentBrief: acc.contentBrief
+      contentBrief: acc.contentBrief,
+      authorPersona: acc.authorPersona ?? ''
     }
   }
   accountForm.value = next
@@ -122,7 +125,8 @@ async function save() {
           .split(/[、,，]/)
           .map(s => s.trim())
           .filter(Boolean),
-        contentBrief: form.contentBrief
+        contentBrief: form.contentBrief,
+        authorPersona: form.authorPersona
       })
     }
     await loadAccounts()
@@ -229,6 +233,12 @@ async function saveSkill() {
             class="textarea textarea-bordered textarea-sm w-full"
             rows="2"
             placeholder="运营方向说明（选填）"
+          />
+          <textarea
+            v-model="accountForm[acc.platform].authorPersona"
+            class="textarea textarea-bordered textarea-sm w-full"
+            rows="2"
+            placeholder="创作人设（选填），如：网络安全从业者，用科普口吻向普通读者解释风险，不说教、不堆术语"
           />
         </div>
       </div>

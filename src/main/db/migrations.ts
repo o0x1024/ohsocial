@@ -21,6 +21,9 @@ function ensurePlatformAccountContentProfile(db: Database.Database): void {
   if (!hasColumn(db, 'platform_accounts', 'is_builtin')) {
     db.exec(`ALTER TABLE platform_accounts ADD COLUMN is_builtin INTEGER DEFAULT 0`)
   }
+  if (!hasColumn(db, 'platform_accounts', 'author_persona')) {
+    db.exec(`ALTER TABLE platform_accounts ADD COLUMN author_persona TEXT DEFAULT ''`)
+  }
 }
 
 export function ensureIncrementalMigrations(db: Database.Database): void {
@@ -105,6 +108,7 @@ export function ensureIncrementalMigrations(db: Database.Database): void {
       content_domain TEXT DEFAULT '',
       content_keywords TEXT DEFAULT '[]',
       content_brief TEXT DEFAULT '',
+      author_persona TEXT DEFAULT '',
       is_builtin INTEGER DEFAULT 0,
       updated_at TEXT DEFAULT (datetime('now'))
     );

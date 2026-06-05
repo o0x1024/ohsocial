@@ -17,26 +17,7 @@ import { exportContentMarkdown, exportAllMarkdown } from '../services/export'
 import { diffLines, stripHtml } from '../../shared/text-diff'
 import { hotspotDAO } from '../db/dao/hotspot-dao'
 import { materialDAO } from '../db/dao/material-dao'
-
-function parseJsonArray<T>(text: string): T[] {
-  const m = text.match(/\[[\s\S]*\]/)
-  if (!m) return []
-  try {
-    return JSON.parse(m[0]) as T[]
-  } catch {
-    return []
-  }
-}
-
-function parseJsonObject<T>(text: string): T | null {
-  const m = text.match(/\{[\s\S]*\}/)
-  if (!m) return null
-  try {
-    return JSON.parse(m[0]) as T
-  } catch {
-    return null
-  }
-}
+import { parseJsonArrayFromText, parseJsonObjectFromText } from '../../shared/json-parse'
 
 export function registerExtendedHandlers(): void {
   ipcMain.handle('version:list', (_e, contentId: number) => versionDAO.list(contentId))
@@ -105,7 +86,8 @@ export function registerExtendedHandlers(): void {
       notes: data.notes as string | undefined,
       contentDomain: data.contentDomain as string | undefined,
       contentKeywords: data.contentKeywords as string[] | undefined,
-      contentBrief: data.contentBrief as string | undefined
+      contentBrief: data.contentBrief as string | undefined,
+      authorPersona: data.authorPersona as string | undefined
     })
   )
   ipcMain.handle('account:create', (_e, displayName: string, platformId?: string) => {
@@ -173,7 +155,7 @@ export function registerExtendedHandlers(): void {
     runWithAiProgress(event.sender, 'AI 推荐选题', async progress => {
     const result = await modelService.recommendTopics(5, { progress, signal: progress?.signal }, platformId)
     if (!result.success) return result
-    const items = parseJsonArray<{
+    const items = parseJsonArrayFromText<{
       title: string
       description?: string
       domain?: string
@@ -197,6 +179,12 @@ export function registerExtendedHandlers(): void {
         })
       )
     }
+    if (created.length === 0) {
+      return {
+        success: false,
+        error: items.length > 0 ? '未能保存 AI 推荐的选题，请重试' : '未能解析 AI 返回的选题列表，请重试'
+      }
+    }
     return { success: true, topics: created, raw: result.content }
   }, r => ({ success: r.success, error: r.error }))
   )
@@ -210,7 +198,7 @@ export function registerExtendedHandlers(): void {
       signal: progress?.signal
     }, topic.targetPlatforms)
     if (!result.success) return result
-    const parsed = parseJsonObject<{ score: number; reason: string }>(result.content)
+    const parsed = parseJsonObjectFromText<{ score: number; reason: string }>(result.content)
     if (parsed) {
       topicDAO.update(id, { aiScore: parsed.score, aiScoreReason: parsed.reason })
     }
@@ -260,7 +248,7 @@ export function registerExtendedHandlers(): void {
       signal: progress?.signal
     })
     if (!result.success) return result
-    const parsed = parseJsonObject<{ tags: string[] }>(result.content)
+    const parsed = parseJsonObjectFromText<{ tags: string[] }>(result.content)
     const tags = parsed?.tags ?? result.content.split(/[、,，\n]/).map(s => s.trim()).filter(Boolean).slice(0, 6)
     const updated = materialDAO.update(id, { tags })
     return { success: true, material: updated, tags }

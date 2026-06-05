@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 interface Conversation {
   id: number
@@ -26,12 +26,9 @@ const skillId = ref('')
 const loading = ref(false)
 const sending = ref(false)
 const hasModel = ref(false)
-const streamingText = ref('')
 const listRef = ref<HTMLElement | null>(null)
 
 const skills = ref<Array<{ id: string; name: string }>>([])
-
-let deltaHandler: ((...args: unknown[]) => void) | null = null
 
 const activeTitle = computed(() => {
   if (!activeId.value) return 'AI 助手'
@@ -44,14 +41,6 @@ const filteredConversations = computed(() => {
   return conversations.value.filter(c => c.title.toLowerCase().includes(q))
 })
 
-const displayMessages = computed(() => {
-  const list = [...messages.value]
-  if (streamingText.value) {
-    list.push({ id: -1, role: 'assistant', content: streamingText.value })
-  }
-  return list
-})
-
 async function loadConversations() {
   conversations.value = (await window.ohsocial.invoke('assistant:conversations')) as Conversation[]
 }
@@ -60,7 +49,6 @@ async function selectConversation(id: number) {
   activeId.value = id
   router.replace({ path: `/assistant/${id}` })
   messages.value = (await window.ohsocial.invoke('assistant:messages', id)) as Message[]
-  streamingText.value = ''
   await nextTick()
   listRef.value?.scrollTo({ top: listRef.value.scrollHeight, behavior: 'smooth' })
 }
@@ -85,7 +73,6 @@ async function send() {
   sending.value = true
   input.value = ''
   messages.value.push({ id: -2, role: 'user', content: text })
-  streamingText.value = ''
   await nextTick()
   listRef.value?.scrollTo({ top: listRef.value.scrollHeight })
 
@@ -100,7 +87,6 @@ async function send() {
     messages.value.push({ id: -3, role: 'assistant', content: `错误：${result.error}` })
   }
   sending.value = false
-  streamingText.value = ''
   messages.value = (await window.ohsocial.invoke('assistant:messages', activeId.value)) as Message[]
   await loadConversations()
   await nextTick()
@@ -115,24 +101,12 @@ onMounted(async () => {
   ]
   await loadConversations()
 
-  deltaHandler = (payload: unknown) => {
-    const p = payload as { conversationId?: number; delta?: string; mode?: string }
-    if (p.mode === 'assistant' && p.conversationId === activeId.value && p.delta) {
-      streamingText.value += p.delta
-      nextTick(() => listRef.value?.scrollTo({ top: listRef.value.scrollHeight }))
-    }
-  }
-  window.ohsocial.on('ai:delta', deltaHandler)
-
   const id = Number(route.params.id)
   if (id && conversations.value.some(c => c.id === id)) {
     await selectConversation(id)
   }
 })
 
-onUnmounted(() => {
-  if (deltaHandler) window.ohsocial.off('ai:delta', deltaHandler)
-})
 </script>
 
 <template>
@@ -199,7 +173,7 @@ onUnmounted(() => {
         <template v-else>
           <div ref="listRef" class="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin">
             <div
-              v-for="(m, i) in displayMessages"
+              v-for="(m, i) in messages"
               :key="`${m.id}-${i}`"
               class="flex"
               :class="m.role === 'user' ? 'justify-end' : 'justify-start'"
@@ -216,10 +190,9 @@ onUnmounted(() => {
               >
                 <span v-if="m.toolName" class="text-xs opacity-60 block mb-1">工具 {{ m.toolName }}</span>
                 {{ m.content }}
-                <span v-if="m.id === -1 && sending" class="inline-block w-1.5 h-4 ml-1 bg-current animate-pulse" />
               </div>
             </div>
-            <div v-if="sending && !streamingText" class="text-sm text-base-content/50 flex items-center gap-2">
+            <div v-if="sending" class="text-sm text-base-content/50 flex items-center gap-2">
               <span class="loading loading-spinner loading-xs" />
               思考中…
             </div>

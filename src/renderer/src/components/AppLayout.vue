@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from 'vue-router'
 import { computed } from 'vue'
+import { resolveNavPath } from '../composables/useNavMemory'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,7 +24,8 @@ const activePath = computed(() => {
 })
 
 function navigate(path: string) {
-  if (route.path !== path) router.push(path)
+  const target = resolveNavPath(path)
+  if (route.path !== target) router.push(target)
 }
 </script>
 

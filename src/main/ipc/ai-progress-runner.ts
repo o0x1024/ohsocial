@@ -1,4 +1,4 @@
-import { ipcMain, type WebContents } from 'electron'
+import { ipcMain, BrowserWindow, type WebContents } from 'electron'
 import { createAiProgress, type AiProgressEmitter } from '../ai/ai-progress'
 import { selectModelConfig } from '../ai/model-resolve'
 import axios from 'axios'
@@ -24,13 +24,20 @@ function isCancelledError(err: unknown): boolean {
   return false
 }
 
+function resolveProgressSender(sender: WebContents): WebContents | undefined {
+  if (sender && !sender.isDestroyed()) return sender
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  if (win && !win.isDestroyed()) return win.webContents
+  return undefined
+}
+
 export async function runWithAiProgress<T>(
   sender: WebContents,
   label: string,
   fn: (progress: AiProgressEmitter | undefined) => Promise<T>,
   endState?: (result: T) => { success: boolean; error?: string }
 ): Promise<T> {
-  const progress = createAiProgress(sender, label)
+  const progress = createAiProgress(resolveProgressSender(sender), label)
   if (progress) {
     activeTasks.set(progress.taskId, progress)
     const model = selectModelConfig()
@@ -50,7 +57,7 @@ export async function runWithAiProgress<T>(
         : 'AI 调用失败'
     progress?.end(false, msg)
     if (cancelled) return undefined as T
-    throw err
+    throw new Error(msg)
   } finally {
     if (progress) activeTasks.delete(progress.taskId)
   }

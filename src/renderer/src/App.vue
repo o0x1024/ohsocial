@@ -16,7 +16,11 @@ onMounted(async () => {
 
 <template>
   <AppLayout>
-    <RouterView />
+    <RouterView v-slot="{ Component, route }">
+      <KeepAlive>
+        <component :is="Component" :key="route.fullPath" />
+      </KeepAlive>
+    </RouterView>
   </AppLayout>
   <OnboardingModal v-if="showOnboarding" @complete="showOnboarding = false" />
   <AiProgressDialog />

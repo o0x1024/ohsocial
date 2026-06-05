@@ -15,6 +15,7 @@ interface Row {
   content_domain: string
   content_keywords: string
   content_brief: string
+  author_persona: string
   is_builtin: number
   updated_at: string
 }
@@ -31,6 +32,7 @@ function rowToAccount(row: Row) {
     contentDomain: row.content_domain ?? '',
     contentKeywords: JSON.parse(row.content_keywords || '[]') as string[],
     contentBrief: row.content_brief ?? '',
+    authorPersona: row.author_persona ?? '',
     isBuiltin: row.is_builtin === 1,
     updatedAt: row.updated_at
   }
@@ -55,8 +57,8 @@ class PlatformAccountDAO extends BaseDAO {
     const id = this.insert(
       `INSERT INTO platform_accounts
         (platform, display_name, account_name, account_id, followers, notes,
-         content_domain, content_keywords, content_brief, is_builtin)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+         content_domain, content_keywords, content_brief, author_persona, is_builtin)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
       [
         platform,
         input.displayName,
@@ -66,7 +68,8 @@ class PlatformAccountDAO extends BaseDAO {
         input.notes ?? '',
         input.contentDomain ?? '',
         JSON.stringify(input.contentKeywords ?? []),
-        input.contentBrief ?? ''
+        input.contentBrief ?? '',
+        input.authorPersona ?? ''
       ]
     )
     const row = this.get<Row>('SELECT * FROM platform_accounts WHERE id = ?', [id])
@@ -79,7 +82,7 @@ class PlatformAccountDAO extends BaseDAO {
       this.run(
         `UPDATE platform_accounts SET
           display_name = ?, account_name = ?, account_id = ?, followers = ?, notes = ?,
-          content_domain = ?, content_keywords = ?, content_brief = ?,
+          content_domain = ?, content_keywords = ?, content_brief = ?, author_persona = ?,
           updated_at = datetime('now')
          WHERE id = ?`,
         [
@@ -91,6 +94,7 @@ class PlatformAccountDAO extends BaseDAO {
           data.contentDomain ?? existing.content_domain ?? '',
           JSON.stringify(data.contentKeywords ?? JSON.parse(existing.content_keywords || '[]')),
           data.contentBrief ?? existing.content_brief ?? '',
+          data.authorPersona ?? existing.author_persona ?? '',
           existing.id
         ]
       )

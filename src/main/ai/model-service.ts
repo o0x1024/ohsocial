@@ -54,14 +54,16 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
-/** 剥离模型嵌入正文中的思考块（如 …） */
+/** 剥离模型嵌入正文中的思考块 */
 function stripEmbeddedThinking(text: string): string {
+  const thinkOpen = '<' + 'think' + '>'
+  const thinkClose = '<' + '/' + 'think' + '>'
   let result = text
-  result = result.replace(/[\s\S]*?<\/think>/gi, '')
-  result = result.replace(/[\s\S]*?<\/redacted_reasoning>/gi, '')
-  if (/^[\s\S]*$/i.test(result) && !/<\/think>/i.test(result)) {
+  result = result.replace(new RegExp(thinkOpen + '[\\s\\S]*?' + thinkClose, 'gi'), '')
+  result = result.replace(/<redacted_reasoning>[\s\S]*?<\/redacted_reasoning>/gi, '')
+  if (new RegExp('^' + thinkOpen + '[\\s\\S]*$', 'i').test(result) && !new RegExp(thinkClose, 'i').test(result)) {
     result = ''
-  } else if (/^[\s\S]*$/i.test(result) && !/<\/redacted_reasoning>/i.test(result)) {
+  } else if (/^<redacted_reasoning>[\s\S]*$/i.test(result) && !/<\/redacted_reasoning>/i.test(result)) {
     result = ''
   }
   return result.trim()
@@ -75,7 +77,8 @@ const CONTENT_OUTPUT_STEPS = new Set([
   'material_tag',
   'topic_score',
   'topic_recommend',
-  'schedule_suggest'
+  'schedule_suggest',
+  'script_generate'
 ])
 
 function applyProviderBodyParams(
@@ -84,17 +87,42 @@ function applyProviderBodyParams(
   providerOptionsJson: string | null,
   step: string
 ): void {
-  if (!isDeepSeekProvider(modelType)) return
-  const opts = parseDeepSeekProviderOptions(providerOptionsJson)
   if (CONTENT_OUTPUT_STEPS.has(step)) {
-    applyDeepSeekThinkingParams(body, { ...opts, thinkingEnabled: false })
-  } else {
+    // 豆包/DeepSeek 等思考模型：正文产出步骤关闭 thinking，避免正文只出现在 reasoning_content
+    body.thinking = { type: 'disabled' }
+    if (isDeepSeekProvider(modelType)) {
+      const opts = parseDeepSeekProviderOptions(providerOptionsJson)
+      applyDeepSeekThinkingParams(body, { ...opts, thinkingEnabled: false })
+    }
+    return
+  }
+  if (isDeepSeekProvider(modelType)) {
+    const opts = parseDeepSeekProviderOptions(providerOptionsJson)
     applyDeepSeekThinkingParams(body, opts)
   }
 }
 
 function finalizeModelContent(raw: string): string {
   return stripEmbeddedThinking(raw)
+}
+
+function resolveOutputContent(step: string, content: string, thinking: string): string {
+  const finalized = finalizeModelContent(content)
+  if (finalized || !CONTENT_OUTPUT_STEPS.has(step)) return finalized
+  return finalizeModelContent(thinking)
+}
+
+function extractStreamParts(choice: Record<string, unknown> | undefined): {
+  thinkingRaw: string
+  contentRaw: string
+} {
+  const delta = choice?.delta as Record<string, unknown> | undefined
+  const message = choice?.message as Record<string, unknown> | undefined
+  const thinkingRaw = String(
+    delta?.reasoning_content ?? delta?.reasoning ?? message?.reasoning_content ?? message?.reasoning ?? ''
+  )
+  const contentRaw = String(delta?.content ?? message?.content ?? '')
+  return { thinkingRaw, contentRaw }
 }
 
 export class ModelService {
@@ -164,9 +192,7 @@ export class ModelService {
               if (data === '[DONE]') continue
               try {
                 const parsed = JSON.parse(data)
-                const choice = parsed.choices?.[0]?.delta
-                const thinkingRaw = (choice?.reasoning_content ?? choice?.reasoning ?? '') as string
-                const contentRaw = (choice?.content ?? '') as string
+                const { thinkingRaw, contentRaw } = extractStreamParts(parsed.choices?.[0])
                 const thinkingDelta = takeStreamIncrement(thinking, thinkingRaw)
                 const delta = takeStreamIncrement(content, contentRaw)
                 if (thinkingDelta) {
@@ -185,7 +211,7 @@ export class ModelService {
           response.data.on('end', () => resolve())
           response.data.on('error', reject)
         })
-        const finalContent = finalizeModelContent(content)
+        const finalContent = resolveOutputContent(request.step, content, thinking)
         this.logGeneration(request.step, config.modelType, modelName, started, true)
         llmLogger.logResponse({
           step: request.step,
@@ -209,8 +235,8 @@ export class ModelService {
         timeout: 120_000
       })
       const message = response.data.choices?.[0]?.message
-      const thinking = ((message?.reasoning_content ?? message?.reasoning ?? '') as string) || undefined
-      const content = finalizeModelContent((message?.content ?? '') as string)
+      const thinking = ((message?.reasoning_content ?? message?.reasoning ?? '') as string) || ''
+      const content = resolveOutputContent(request.step, (message?.content ?? '') as string, thinking)
       this.logGeneration(request.step, config.modelType, modelName, started, true)
       llmLogger.logResponse({
         step: request.step,
@@ -315,9 +341,14 @@ export class ModelService {
     title: string,
     brief: string,
     callbacks?: StreamCallbacks,
-    writingStyleId?: number | null
+    writingStyleId?: number | null,
+    platformIds: string[] = []
   ): Promise<ModelChatResponse> {
     const styleCtx = this.buildWritingStyleContext(writingStyleId)
+    const platformCtx = this.buildPlatformsContext(platformIds)
+    const personaHint = this.hasConfiguredPersona(platformIds)
+      ? '\n写作时必须代入上述创作人设的视角、专业背景与表达口吻。'
+      : ''
     const formatRules = `
 排版规则（必须严格遵守）：
 1. 使用丰富的 HTML 标签构建层次：<h2> 小节标题、<p> 正文段落、<strong> 关键词/重点句、<blockquote> 金句或引言、<ul>/<ol> 要点列举
@@ -329,7 +360,7 @@ export class ModelService {
 7. 直接输出 HTML 正文，不要输出文章大标题、不要解释、不要 markdown 代码块`
     return this.chat({
       step: 'content_generate',
-      systemPrompt: `你是自媒体写作助手。${styleCtx ? `\n\n${styleCtx}` : ''}\n请严格遵循上述文风要求，根据标题与要点独立完成一篇完整文章，由你全权代笔。\n${formatRules}`,
+      systemPrompt: `你是自媒体写作助手。${platformCtx ? `\n${platformCtx}` : ''}${personaHint}${styleCtx ? `\n\n${styleCtx}` : ''}\n请严格遵循上述文风要求，根据标题与要点独立完成一篇完整文章，由你全权代笔。\n${formatRules}`,
       prompt: `文章标题：${title}${brief ? `\n\n选题要点：\n${brief}` : ''}\n\n请撰写完整正文。`,
       temperature: 0.85,
       maxTokens: 8192
@@ -341,12 +372,17 @@ export class ModelService {
     selectedText: string,
     instruction: string,
     callbacks?: StreamCallbacks,
-    writingStyleId?: number | null
+    writingStyleId?: number | null,
+    platformIds: string[] = []
   ): Promise<ModelChatResponse> {
     const styleCtx = this.buildWritingStyleContext(writingStyleId)
+    const platformCtx = this.buildPlatformsContext(platformIds)
+    const personaHint = this.hasConfiguredPersona(platformIds)
+      ? '\n改写时保持上述创作人设的视角与口吻。'
+      : ''
     return this.chat({
       step: 'content_rewrite',
-      systemPrompt: `你是自媒体写作助手。${styleCtx ? `\n\n${styleCtx}` : ''}\n按用户指令改写选中文本，保留 HTML 排版标签（<p>、<strong>、<blockquote>、<ul> 等），只输出改写结果，不要解释。`,
+      systemPrompt: `你是自媒体写作助手。${platformCtx ? `\n${platformCtx}` : ''}${personaHint}${styleCtx ? `\n\n${styleCtx}` : ''}\n按用户指令改写选中文本，保留 HTML 排版标签（<p>、<strong>、<blockquote>、<ul> 等），只输出改写结果，不要解释。`,
       prompt: `文章标题：${title}\n选中文本：\n${selectedText}\n\n改写要求：${instruction || '换个说法'}`,
       temperature: 0.7
     }, callbacks)
@@ -378,6 +414,22 @@ ${plain}`,
     }, callbacks)
   }
 
+  private hasConfiguredPersona(platformIds: string[]): boolean {
+    return platformIds.some(id => {
+      const account = platformAccountDAO.getByPlatform(id)
+      return Boolean(account?.authorPersona?.trim())
+    })
+  }
+
+  private buildPlatformsContext(platformIds: string[]): string {
+    const ids = [...new Set(platformIds.filter(Boolean))]
+    if (ids.length === 0) return ''
+    return ids
+      .map(id => this.buildPlatformContext(id).trim())
+      .filter(Boolean)
+      .join('\n\n')
+  }
+
   private buildPlatformContext(platformId?: string): string {
     if (!platformId) return ''
     const account = platformAccountDAO.getByPlatform(platformId)
@@ -385,11 +437,13 @@ ${plain}`,
       return `\n目标平台：${platformName(platformId)}`
     }
     const keywords = account.contentKeywords.length ? account.contentKeywords.join('、') : '未配置'
+    const persona = account.authorPersona?.trim() || '未配置'
     return `
 目标平台：${platformName(platformId)}
 内容领域：${account.contentDomain || '未配置'}
 领域关键词：${keywords}
-运营方向：${account.contentBrief || '未配置'}`
+运营方向：${account.contentBrief || '未配置'}
+创作人设：${persona}`
   }
 
   async recommendTopics(
@@ -426,7 +480,9 @@ ${plain}`,
       const parts = targetPlatforms.map(id => {
         const account = platformAccountDAO.getByPlatform(id)
         if (!account) return `${platformName(id)}：未配置内容领域`
-        return `${platformName(id)}：${account.contentDomain || '未配置领域'}（${account.contentBrief || '无运营说明'}）`
+        const persona = account.authorPersona?.trim()
+        const personaPart = persona ? `；人设：${persona}` : ''
+        return `${platformName(id)}：${account.contentDomain || '未配置领域'}（${account.contentBrief || '无运营说明'}${personaPart}）`
       })
       platformContext = `\n目标平台及领域定位：\n${parts.join('\n')}`
     }

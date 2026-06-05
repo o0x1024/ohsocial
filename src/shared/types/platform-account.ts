@@ -9,6 +9,8 @@ export interface PlatformAccount {
   contentDomain: string
   contentKeywords: string[]
   contentBrief: string
+  /** 创作人设：写作视角与身份，如「网络安全从业者，用科普口吻面向普通读者」 */
+  authorPersona: string
   isBuiltin: boolean
   updatedAt: string
 }
@@ -22,6 +24,7 @@ export interface PlatformAccountUpsertInput {
   contentDomain?: string
   contentKeywords?: string[]
   contentBrief?: string
+  authorPersona?: string
 }
 
 export interface PlatformAccountCreateInput extends PlatformAccountUpsertInput {

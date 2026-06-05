@@ -6,7 +6,6 @@ import { executeTool, TOOL_SCHEMAS } from '../tools/executor'
 import { getSkill, BUILTIN_SKILLS } from '../../shared/skills'
 import { platformAccountDAO } from '../db/dao/platform-account-dao'
 import { customSkillDAO } from '../db/dao/custom-skill-dao'
-import type { AiProgressEmitter } from './ai-progress'
 import { llmLogger } from '../services/file-logger'
 
 function resolveSkill(skillId?: string) {
@@ -41,9 +40,7 @@ export class AssistantService {
   async sendMessage(
     conversationId: number,
     userText: string,
-    skillId?: string,
-    onDelta?: (delta: string) => void,
-    progress?: AiProgressEmitter
+    skillId?: string
   ): Promise<{ success: boolean; content: string; error?: string }> {
     const config = selectModelConfig()
     if (!config) {
@@ -81,7 +78,6 @@ export class AssistantService {
     const gen = config.generationParams
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      progress?.status(round === 0 ? '正在思考…' : '正在根据工具结果继续推理…')
       const body: Record<string, unknown> = {
         model: modelName,
         messages: apiMessages,
@@ -145,7 +141,6 @@ export class AssistantService {
 
           for (const tc of message.tool_calls) {
             const fn = tc.function
-            progress?.status(`调用工具：${fn.name}`)
             const args = JSON.parse(fn.arguments || '{}')
             const result = await executeTool(fn.name, args)
             const resultStr = JSON.stringify(result, null, 2)
@@ -175,10 +170,6 @@ export class AssistantService {
           meta: { conversationId, round }
         })
         assistantDAO.addMessage(conversationId, 'assistant', content)
-        if (content) {
-          progress?.delta(content, 'content', { conversationId, mode: 'assistant' })
-          onDelta?.(content)
-        }
         return { success: true, content }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : '助手调用失败'

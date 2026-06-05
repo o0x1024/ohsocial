@@ -127,6 +127,9 @@ if (import.meta.hot) {
     clearHideTimer()
     clearElapsedTimer()
   })
+  import.meta.hot.accept(() => {
+    initAiProgressBridge()
+  })
 }
 
 async function cancelTask() {

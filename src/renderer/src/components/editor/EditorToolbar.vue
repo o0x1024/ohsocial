@@ -1,10 +1,32 @@
 <script setup lang="ts">
+import { onBeforeUnmount, ref } from 'vue'
 import type { Editor } from '@tiptap/core'
+import { copyEditorContent } from './editor-clipboard'
 import { shortcut } from './editor-shortcuts'
 
 defineProps<{ editor: Editor }>()
 
 const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899']
+const copyDone = ref(false)
+let copyTimer: ReturnType<typeof setTimeout> | null = null
+
+async function copyContent(editor: Editor) {
+  const ok = await copyEditorContent(editor)
+  if (!ok) {
+    alert('复制失败')
+    return
+  }
+  copyDone.value = true
+  if (copyTimer) clearTimeout(copyTimer)
+  copyTimer = setTimeout(() => {
+    copyDone.value = false
+    copyTimer = null
+  }, 1200)
+}
+
+onBeforeUnmount(() => {
+  if (copyTimer) clearTimeout(copyTimer)
+})
 
 function setLink(editor: Editor) {
   const prev = editor.getAttributes('link').href as string | undefined
@@ -222,6 +244,18 @@ function setLink(editor: Editor) {
       @click="editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()"
     >
       表
+    </button>
+
+    <span class="w-px h-4 bg-base-300 mx-1" />
+
+    <button
+      type="button"
+      class="btn btn-xs"
+      :class="{ 'btn-success': copyDone }"
+      :title="copyDone ? '已复制' : '一键复制'"
+      @click="copyContent(editor)"
+    >
+      {{ copyDone ? '已复制' : '复制' }}
     </button>
 
     <slot />
