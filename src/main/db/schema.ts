@@ -2,6 +2,7 @@ import { getDatabase } from './connection'
 import { ensureIncrementalMigrations } from './migrations'
 import { ensureModelConfigsAnovelSchema } from './assistant-schema'
 import { seedModelConfigs } from './model-seed'
+import { seedBuiltinWritingStyles } from './writing-style-seed'
 
 export function initSchema(): void {
   const db = getDatabase()
@@ -60,16 +61,6 @@ export function initSchema(): void {
       FOREIGN KEY (topic_id) REFERENCES topics(id) ON DELETE SET NULL
     );
 
-    CREATE TABLE IF NOT EXISTS persona (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      domains TEXT DEFAULT '[]',
-      audience TEXT DEFAULT '',
-      style TEXT DEFAULT '',
-      persona_desc TEXT DEFAULT '',
-      differentiator TEXT DEFAULT '',
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
     CREATE TABLE IF NOT EXISTS model_configs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       model_type TEXT NOT NULL UNIQUE,
@@ -99,9 +90,6 @@ export function initSchema(): void {
   ensureIncrementalMigrations(db)
   ensureModelConfigsAnovelSchema(db)
   seedModelConfigs()
+  seedBuiltinWritingStyles()
 
-  const personaCount = db.prepare('SELECT COUNT(*) as c FROM persona').get() as { c: number }
-  if (personaCount.c === 0) {
-    db.prepare('INSERT INTO persona (domains, audience, style) VALUES (?, ?, ?)').run('[]', '', '')
-  }
 }

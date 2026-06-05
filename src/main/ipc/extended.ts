@@ -4,6 +4,7 @@ import path from 'path'
 import { versionDAO } from '../db/dao/version-dao'
 import { scheduleTemplateDAO, type TemplatePattern } from '../db/dao/schedule-template-dao'
 import { platformAccountDAO } from '../db/dao/platform-account-dao'
+import { slugifyPlatformName } from '../../shared/platform-slug'
 import { customSkillDAO } from '../db/dao/custom-skill-dao'
 import { metricsDAO } from '../db/dao/metrics-dao'
 import { appPreferenceDAO } from '../db/dao/app-preference-dao'
@@ -97,12 +98,30 @@ export function registerExtendedHandlers(): void {
   ipcMain.handle('account:list', () => platformAccountDAO.list())
   ipcMain.handle('account:upsert', (_e, platform: string, data: Record<string, unknown>) =>
     platformAccountDAO.upsert(platform, {
+      displayName: data.displayName as string | undefined,
       accountName: data.accountName as string | undefined,
       accountId: data.accountId as string | undefined,
       followers: data.followers as number | undefined,
-      notes: data.notes as string | undefined
+      notes: data.notes as string | undefined,
+      contentDomain: data.contentDomain as string | undefined,
+      contentKeywords: data.contentKeywords as string[] | undefined,
+      contentBrief: data.contentBrief as string | undefined
     })
   )
+  ipcMain.handle('account:create', (_e, displayName: string, platformId?: string) => {
+    const name = displayName.trim()
+    if (!name) return { success: false, error: '请输入平台名称' }
+    const platform = (platformId?.trim() || slugifyPlatformName(name))
+    if (platformAccountDAO.getByPlatform(platform)) {
+      return { success: false, error: '该平台已存在' }
+    }
+    const account = platformAccountDAO.create(platform, { displayName: name })
+    return { success: true, account }
+  })
+  ipcMain.handle('account:delete', (_e, platform: string) => {
+    const ok = platformAccountDAO.delete(platform)
+    return { success: ok, error: ok ? undefined : '平台不存在' }
+  })
 
   ipcMain.handle('skill:list', () => customSkillDAO.list())
   ipcMain.handle('skill:upsert', (_e, skillId: string, name: string, content: string, description?: string) =>
@@ -150,19 +169,29 @@ export function registerExtendedHandlers(): void {
     return true
   })
 
-  ipcMain.handle('topic:recommend', async event =>
+  ipcMain.handle('topic:recommend', async (event, platformId?: string) =>
     runWithAiProgress(event.sender, 'AI 推荐选题', async progress => {
-    const result = await modelService.recommendTopics(5, { progress, signal: progress?.signal })
+    const result = await modelService.recommendTopics(5, { progress, signal: progress?.signal }, platformId)
     if (!result.success) return result
-    const items = parseJsonArray<{ title: string; description?: string; domain?: string }>(result.content)
+    const items = parseJsonArray<{
+      title: string
+      description?: string
+      domain?: string
+      targetPlatforms?: string[]
+    }>(result.content)
+    const account = platformId ? platformAccountDAO.getByPlatform(platformId) : undefined
     const created = []
     for (const item of items) {
       if (!item.title) continue
+      const targetPlatforms = platformId
+        ? [platformId]
+        : (item.targetPlatforms ?? []).filter(Boolean)
       created.push(
         topicDAO.create({
           title: item.title,
           description: item.description ?? '',
-          domain: item.domain ?? '',
+          domain: item.domain ?? account?.contentDomain ?? '',
+          targetPlatforms,
           source: 'ai_recommend',
           status: 'idea'
         })
@@ -179,7 +208,7 @@ export function registerExtendedHandlers(): void {
     const result = await modelService.scoreTopic(topic.title, topic.description, {
       progress,
       signal: progress?.signal
-    })
+    }, topic.targetPlatforms)
     if (!result.success) return result
     const parsed = parseJsonObject<{ score: number; reason: string }>(result.content)
     if (parsed) {

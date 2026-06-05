@@ -1,10 +1,11 @@
 import { ipcMain } from 'electron'
 import { topicDAO } from '../db'
+import type { TopicListFilter } from '../db/dao/topic-dao'
 import type { TopicCreateInput, TopicUpdateInput } from '../../shared/types/topic'
 
 export function registerTopicHandlers(): void {
-  ipcMain.handle('topic:list', (_event, status?: string) => {
-    return topicDAO.list(status)
+  ipcMain.handle('topic:list', (_event, filter?: TopicListFilter | string) => {
+    return topicDAO.list(filter)
   })
 
   ipcMain.handle('topic:get', (_event, id: number) => {
@@ -23,7 +24,8 @@ export function registerTopicHandlers(): void {
     return topicDAO.delete(id)
   })
 
-  ipcMain.handle('topic:stats', () => {
-    return topicDAO.countByStatus()
-  })
+  ipcMain.handle('topic:stats', () => ({
+    byStatus: topicDAO.countByStatus(),
+    byPlatform: topicDAO.countByPlatform()
+  }))
 }

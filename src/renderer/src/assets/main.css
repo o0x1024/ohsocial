@@ -98,40 +98,88 @@
    ============================================ */
 
 @layer components {
-  /* Tiptap 编辑器样式 */
+  /* Tiptap 编辑器样式 — 中文长文阅读优化 */
   .tiptap-editor .ProseMirror {
-    @apply outline-none min-h-[300px] p-4;
+    @apply outline-none min-h-[300px] px-6 py-5;
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.8;
+    letter-spacing: 0.02em;
+    font-feature-settings: 'kern' 1, 'liga' 1;
+    word-break: break-all;
+    overflow-wrap: break-word;
   }
   .tiptap-editor .ProseMirror p {
-    @apply my-1;
+    @apply my-3;
+    text-align: justify;
+  }
+  .tiptap-editor .ProseMirror p + p {
+    @apply mt-4;
   }
   .tiptap-editor .ProseMirror h1 {
-    @apply text-2xl font-bold my-3;
+    @apply text-2xl font-bold mt-8 mb-4;
+    line-height: 1.4;
   }
   .tiptap-editor .ProseMirror h2 {
-    @apply text-xl font-bold my-2;
+    @apply text-xl font-bold mt-8 mb-3;
+    line-height: 1.4;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid oklch(var(--bc) / 0.1);
   }
   .tiptap-editor .ProseMirror h3 {
-    @apply text-lg font-semibold my-2;
+    @apply text-lg font-semibold mt-6 mb-2;
+    line-height: 1.5;
   }
   .tiptap-editor .ProseMirror blockquote {
-    @apply border-l-4 border-primary pl-4 italic my-3;
-    color: oklch(var(--bc) / 0.7);
+    @apply border-l-4 border-primary pl-5 pr-4 py-3 my-5 rounded-r-lg;
+    background-color: oklch(var(--p) / 0.04);
+    color: oklch(var(--bc) / 0.8);
+    font-style: normal;
+    line-height: 1.7;
+  }
+  .tiptap-editor .ProseMirror blockquote p {
+    @apply my-1;
+  }
+  .tiptap-editor .ProseMirror strong {
+    @apply font-bold;
+    color: oklch(var(--bc) / 0.95);
   }
   .tiptap-editor .ProseMirror code {
     @apply bg-base-300 px-1.5 py-0.5 rounded text-sm font-mono;
   }
   .tiptap-editor .ProseMirror pre {
-    @apply bg-base-300 rounded-lg p-4 my-3 overflow-x-auto;
+    @apply bg-base-300 rounded-lg p-4 my-4 overflow-x-auto;
   }
   .tiptap-editor .ProseMirror pre code {
     @apply bg-transparent p-0;
   }
   .tiptap-editor .ProseMirror ul {
-    @apply list-disc pl-6 my-2;
+    @apply list-disc pl-6 my-4;
   }
   .tiptap-editor .ProseMirror ol {
-    @apply list-decimal pl-6 my-2;
+    @apply list-decimal pl-6 my-4;
+  }
+  .tiptap-editor .ProseMirror li {
+    @apply my-1.5;
+    line-height: 1.7;
+  }
+  .tiptap-editor .ProseMirror li p {
+    @apply my-0.5;
+  }
+  .tiptap-editor .ProseMirror > *:first-child {
+    margin-top: 0;
+  }
+  .tiptap-editor .ProseMirror > *:last-child {
+    margin-bottom: 0;
+  }
+  .tiptap-editor .ProseMirror hr {
+    @apply my-8 border-base-300;
+  }
+  .tiptap-editor .ProseMirror mark {
+    @apply rounded px-0.5;
+    background-color: oklch(var(--wa) / 0.25);
+    box-decoration-break: clone;
   }
 
   /* 行数限制 */
@@ -437,6 +485,20 @@
 }
 
 /* tab 内 button 同样被 preflight 重置，layered 的 .tab 规则无法生效 */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.tabs.tabs-boxed,
+.tabs.tabs-box {
+  background-color: var(--color-base-200);
+  padding: 0.25rem;
+  border-radius: var(--radius-box, 1rem);
+}
+
 .tabs .tab {
   -webkit-appearance: none;
   appearance: none;
@@ -445,12 +507,35 @@
   text-decoration: none;
   font: inherit;
   line-height: inherit;
-  color: inherit;
+  color: color-mix(in oklab, var(--color-base-content) 70%, transparent);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(var(--size-field, 0.25rem) * 10);
+  padding-inline: 1rem;
+  padding-block: 0.25rem;
+  border-radius: var(--radius-field, 0.5rem);
+  white-space: nowrap;
+  transition: background-color 0.2s, color 0.2s, box-shadow 0.2s;
 }
 
+.tabs .tab:hover:not(.tab-active, .tab-disabled, [disabled]) {
+  color: var(--color-base-content);
+  background-color: color-mix(in oklab, var(--color-base-content) 6%, transparent);
+}
+
+.tabs .tab.tab-sm {
+  height: calc(var(--size-field, 0.25rem) * 8);
+  padding-inline: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.tabs.tabs-boxed > :is(.tab-active, [aria-selected='true']):not(.tab-disabled, [disabled]),
 .tabs.tabs-box > :is(.tab-active, [aria-selected='true']):not(.tab-disabled, [disabled]) {
   background-color: var(--tab-bg, var(--color-base-100));
   color: var(--color-base-content);
+  font-weight: 600;
   box-shadow:
     0 1px oklch(100% 0 0 / calc(var(--depth, 1) * 0.1)) inset,
     0 1px 1px -1px color-mix(in oklab, var(--color-neutral) calc(var(--depth, 1) * 50%), transparent),

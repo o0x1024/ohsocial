@@ -103,10 +103,11 @@ class ContentDAO extends BaseDAO {
     if (body !== existing.body || title !== existing.title) {
       versionDAO.create(id, existing.title, existing.body, operation)
     }
+    const meta = input.meta !== undefined ? input.meta : existing.meta
     this.run(
       `UPDATE contents SET
         title = ?, topic_id = ?, body = ?, status = ?, word_count = ?,
-        tags = ?, summary = ?, seo_title = ?, updated_at = datetime('now')
+        tags = ?, summary = ?, seo_title = ?, meta = ?, updated_at = datetime('now')
        WHERE id = ?`,
       [
         title,
@@ -117,6 +118,7 @@ class ContentDAO extends BaseDAO {
         JSON.stringify(input.tags ?? existing.tags),
         input.summary !== undefined ? input.summary : existing.summary,
         input.seoTitle !== undefined ? input.seoTitle : existing.seoTitle,
+        JSON.stringify(meta),
         id
       ]
     )

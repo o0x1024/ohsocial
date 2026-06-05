@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, Notification } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { getDatabase, closeDatabase } from '../db/connection'
-import { topicDAO, contentDAO, scheduleDAO, personaDAO } from '../db'
+import { topicDAO, contentDAO, scheduleDAO, platformAccountDAO } from '../db'
 
 export function getDbPath(): string {
   return path.join(app.getPath('userData'), 'ohsocial.db')
@@ -50,7 +50,7 @@ export async function exportJson(): Promise<{ success: boolean; path?: string; e
       topics: topicDAO.list(),
       contents: contentDAO.list(),
       schedules: scheduleDAO.list(),
-      persona: personaDAO.get()
+      platforms: platformAccountDAO.list()
     }
     const { filePath, canceled } = await dialog.showSaveDialog({
       title: '导出 JSON',

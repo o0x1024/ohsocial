@@ -20,6 +20,11 @@ export interface TopicRow {
 
 export type { TopicCreateInput, TopicUpdateInput }
 
+export interface TopicListFilter {
+  status?: string
+  platform?: string
+}
+
 function rowToTopic(row: TopicRow) {
   return {
     id: row.id,
@@ -39,15 +44,29 @@ function rowToTopic(row: TopicRow) {
   }
 }
 
+function matchesPlatformFilter(targetPlatforms: string[], platform?: string): boolean {
+  if (!platform) return true
+  return targetPlatforms.includes(platform)
+}
+
 class TopicDAO extends BaseDAO {
-  list(status?: string): ReturnType<typeof rowToTopic>[] {
-    if (status) {
-      return this.all<TopicRow>(
+  list(filter?: TopicListFilter | string): ReturnType<typeof rowToTopic>[] {
+    const resolved: TopicListFilter =
+      typeof filter === 'string' ? { status: filter } : (filter ?? {})
+
+    let rows: TopicRow[]
+    if (resolved.status) {
+      rows = this.all<TopicRow>(
         'SELECT * FROM topics WHERE status = ? ORDER BY updated_at DESC',
-        [status]
-      ).map(rowToTopic)
+        [resolved.status]
+      )
+    } else {
+      rows = this.all<TopicRow>('SELECT * FROM topics ORDER BY updated_at DESC')
     }
-    return this.all<TopicRow>('SELECT * FROM topics ORDER BY updated_at DESC').map(rowToTopic)
+
+    return rows
+      .map(rowToTopic)
+      .filter(topic => matchesPlatformFilter(topic.targetPlatforms, resolved.platform))
   }
 
   getById(id: number): ReturnType<typeof rowToTopic> | undefined {
@@ -111,6 +130,22 @@ class TopicDAO extends BaseDAO {
       'SELECT status, COUNT(*) as count FROM topics GROUP BY status'
     )
     return Object.fromEntries(rows.map(r => [r.status, r.count]))
+  }
+
+  countByPlatform(): Record<string, number> {
+    const rows = this.all<{ target_platforms: string }>('SELECT target_platforms FROM topics')
+    const counts: Record<string, number> = { unassigned: 0 }
+    for (const row of rows) {
+      const platforms = JSON.parse(row.target_platforms || '[]') as string[]
+      if (platforms.length === 0) {
+        counts.unassigned = (counts.unassigned ?? 0) + 1
+      } else {
+        for (const platform of platforms) {
+          counts[platform] = (counts[platform] ?? 0) + 1
+        }
+      }
+    }
+    return counts
   }
 }
 

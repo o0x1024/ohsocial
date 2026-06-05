@@ -39,4 +39,5 @@ export interface ContentUpdateInput {
   tags?: string[]
   summary?: string | null
   seoTitle?: string | null
+  meta?: Record<string, unknown>
 }

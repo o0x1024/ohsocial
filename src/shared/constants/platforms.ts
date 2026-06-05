@@ -1,4 +1,5 @@
-export const PLATFORMS = [
+/** 内置平台（首次启动时写入数据库，之后以数据库为准） */
+export const BUILTIN_PLATFORMS = [
   { id: 'wechat', name: '微信公众号', icon: 'comment-dots' },
   { id: 'xiaohongshu', name: '小红书', icon: 'book' },
   { id: 'douyin', name: '抖音', icon: 'video' },
@@ -6,7 +7,12 @@ export const PLATFORMS = [
   { id: 'toutiao', name: '今日头条', icon: 'newspaper' }
 ] as const
 
-export type PlatformId = (typeof PLATFORMS)[number]['id']
+export type BuiltinPlatformId = (typeof BUILTIN_PLATFORMS)[number]['id']
+
+export interface PlatformOption {
+  id: string
+  name: string
+}
 
 export const TOPIC_STATUS_LABELS: Record<string, string> = {
   idea: '灵感',

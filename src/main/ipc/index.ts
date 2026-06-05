@@ -1,6 +1,5 @@
 import { registerAppHandlers } from './app'
 import { registerTopicHandlers } from './topic'
-import { registerPersonaHandlers } from './persona'
 import { registerContentHandlers } from './content'
 import { registerScheduleHandlers } from './schedule'
 import { registerModelHandlers } from './model'
@@ -11,13 +10,14 @@ import { registerAssistantHandlers } from './assistant'
 import { registerExtendedHandlers } from './extended'
 import { registerPromptHandlers } from './prompt'
 import { registerLogHandlers } from './log'
+import { registerWritingStyleHandlers } from './writing-style'
+import { registerMediaHandlers } from './media'
 import { registerAiProgressHandlers } from './ai-progress-runner'
 
 export function registerIpcHandlers(): void {
   registerAiProgressHandlers()
   registerAppHandlers()
   registerTopicHandlers()
-  registerPersonaHandlers()
   registerContentHandlers()
   registerScheduleHandlers()
   registerModelHandlers()
@@ -28,4 +28,6 @@ export function registerIpcHandlers(): void {
   registerExtendedHandlers()
   registerPromptHandlers()
   registerLogHandlers()
+  registerWritingStyleHandlers()
+  registerMediaHandlers()
 }

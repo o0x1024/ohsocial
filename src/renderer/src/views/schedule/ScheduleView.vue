@@ -3,9 +3,10 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import type { Schedule, ScheduleCreateInput } from '../../../../shared/types/schedule'
 import type { Content } from '../../../../shared/types/content'
-import { PLATFORMS } from '../../../../shared/constants/platforms'
+import { usePlatformList } from '../../composables/usePlatformList'
 
 const route = useRoute()
+const { platforms, loadPlatforms } = usePlatformList()
 const cursor = ref(new Date())
 const schedules = ref<Schedule[]>([])
 const contents = ref<Content[]>([])
@@ -17,7 +18,7 @@ const aiSuggest = ref('')
 const showTemplates = ref(false)
 
 const form = ref({
-  platform: 'wechat',
+  platform: '',
   scheduledAtLocal: '',
   contentId: null as number | null,
   reminderMinutes: 30
@@ -193,9 +194,12 @@ function applyRouteContent() {
 
 watch(() => route.query.contentId, applyRouteContent)
 
-onMounted(() => {
+onMounted(async () => {
+  const list = await loadPlatforms()
+  if (list.length && !form.value.platform) form.value.platform = list[0].id
   form.value.scheduledAtLocal = toInputValue(new Date())
-  load().then(applyRouteContent)
+  await load()
+  applyRouteContent()
 })
 </script>
 
@@ -224,7 +228,7 @@ onMounted(() => {
       <div class="card-body py-4 gap-3">
         <div class="flex flex-wrap gap-3">
           <select v-model="form.platform" class="select select-bordered select-sm">
-            <option v-for="p in PLATFORMS" :key="p.id" :value="p.id">{{ p.name }}</option>
+            <option v-for="p in platforms" :key="p.id" :value="p.id">{{ p.name }}</option>
           </select>
           <input v-model="form.scheduledAtLocal" type="datetime-local" class="input input-bordered input-sm" />
           <select v-model="form.contentId" class="select select-bordered select-sm max-w-xs">

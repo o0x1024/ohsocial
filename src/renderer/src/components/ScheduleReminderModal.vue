@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { PLATFORMS } from '../../../shared/constants/platforms'
+import { usePlatformList } from '../composables/usePlatformList'
 
 export interface ScheduleReminderPayload {
   scheduleId: number
@@ -14,14 +14,11 @@ export interface ScheduleReminderPayload {
 }
 
 const router = useRouter()
+const { loadPlatforms, platformLabel } = usePlatformList()
 const queue = ref<ScheduleReminderPayload[]>([])
 const current = ref<ScheduleReminderPayload | null>(null)
 
 let handler: ((...args: unknown[]) => void) | null = null
-
-function platformName(id: string) {
-  return PLATFORMS.find(p => p.id === id)?.name ?? id
-}
 
 function showNext() {
   current.value = queue.value.shift() ?? null
@@ -49,7 +46,8 @@ function goContent() {
   }
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadPlatforms()
   handler = (payload: unknown) => {
     queue.value.push(payload as ScheduleReminderPayload)
     if (!current.value) showNext()
@@ -71,10 +69,10 @@ onUnmounted(() => {
       <p class="py-3 text-sm">
         <span class="font-medium">「{{ current.label }}」</span>
         <template v-if="current.kind === 'due'">
-          已到计划发布时间（{{ platformName(current.platform) }}），请前往平台发帖。
+          已到计划发布时间（{{ platformLabel(current.platform) }}），请前往平台发帖。
         </template>
         <template v-else>
-          约 {{ current.reminderMinutes }} 分钟后发布（{{ platformName(current.platform) }}）。
+          约 {{ current.reminderMinutes }} 分钟后发布（{{ platformLabel(current.platform) }}）。
         </template>
       </p>
       <p class="text-xs text-base-content/50">计划时间：{{ current.scheduledAt }}</p>

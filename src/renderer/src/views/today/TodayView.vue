@@ -6,7 +6,7 @@ import type { Content } from '../../../../shared/types/content'
 
 const router = useRouter()
 const topicStats = ref<Record<string, number>>({})
-const personaConfigured = ref(true)
+const platformsConfigured = ref(true)
 const todaySchedules = ref<Schedule[]>([])
 const draftContents = ref<Content[]>([])
 const dashboard = ref<{
@@ -16,8 +16,13 @@ const dashboard = ref<{
 const hotspots = ref<Array<{ id: number; title: string; heatScore?: number | null }>>([])
 
 onMounted(async () => {
-  topicStats.value = (await window.ohsocial.invoke('topic:stats')) as Record<string, number>
-  personaConfigured.value = (await window.ohsocial.invoke('persona:isConfigured')) as boolean
+  const stats = (await window.ohsocial.invoke('topic:stats')) as {
+    byStatus: Record<string, number>
+    byPlatform: Record<string, number>
+  }
+  topicStats.value = stats.byStatus
+  const platforms = (await window.ohsocial.invoke('account:list')) as Array<{ contentDomain: string }>
+  platformsConfigured.value = platforms.some(p => p.contentDomain.trim())
   const today = new Date()
   const from = `${today.toISOString().slice(0, 10)} 00:00:00`
   const to = `${today.toISOString().slice(0, 10)} 23:59:59`
@@ -42,8 +47,8 @@ async function refreshHotspots() {
       <p class="text-base-content/60 text-sm mt-1">今天要做什么，从这里开始</p>
     </header>
 
-    <div v-if="!personaConfigured" class="alert alert-warning mb-6">
-      <span>还没有配置创作偏好，AI 推荐会更准。</span>
+    <div v-if="!platformsConfigured" class="alert alert-warning mb-6">
+      <span>还没有配置平台内容领域，AI 推荐选题将缺少平台上下文。</span>
       <button class="btn btn-sm" @click="router.push('/settings')">去设置</button>
     </div>
 

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { TOPIC_STATUS_LABELS } from '../../../../shared/constants/platforms'
 import type { Topic, TopicCreateInput } from '../../../../shared/types/topic'
+import { usePlatformList } from '../../composables/usePlatformList'
 
 const router = useRouter()
 const topics = ref<Topic[]>([])
@@ -10,31 +11,58 @@ const writingTopicId = ref<number | null>(null)
 const loading = ref(true)
 const showForm = ref(false)
 const newTitle = ref('')
+const newDescription = ref('')
+const newTargetPlatforms = ref<string[]>([])
 const filterStatus = ref('')
+const filterPlatform = ref('')
 const viewMode = ref<'list' | 'kanban'>('list')
 const aiLoading = ref(false)
+const editingTopicId = ref<number | null>(null)
+const editTargetPlatforms = ref<string[]>([])
+
+const { platforms, loadPlatforms, platformLabel } = usePlatformList()
+
+const filteredKanbanTopics = computed(() => {
+  if (!filterPlatform.value) return topics.value
+  return topics.value.filter(t => t.targetPlatforms.includes(filterPlatform.value))
+})
 
 const kanbanColumns = computed(() =>
   Object.keys(TOPIC_STATUS_LABELS).map(key => ({
     key,
     label: TOPIC_STATUS_LABELS[key],
-    items: topics.value.filter(t => t.status === key)
+    items: filteredKanbanTopics.value.filter(t => t.status === key)
   }))
 )
 
 async function loadTopics() {
   loading.value = true
-  const statusFilter = viewMode.value === 'list' && filterStatus.value ? filterStatus.value : undefined
-  topics.value = (await window.ohsocial.invoke('topic:list', statusFilter)) as Topic[]
+  const filter: { status?: string; platform?: string } = {}
+  if (viewMode.value === 'list' && filterStatus.value) filter.status = filterStatus.value
+  if (filterPlatform.value) filter.platform = filterPlatform.value
+  topics.value = (await window.ohsocial.invoke('topic:list', filter)) as Topic[]
   loading.value = false
+}
+
+function togglePlatform(list: string[], platformId: string) {
+  const idx = list.indexOf(platformId)
+  if (idx >= 0) list.splice(idx, 1)
+  else list.push(platformId)
 }
 
 async function createTopic() {
   const title = newTitle.value.trim()
   if (!title) return
-  const input: TopicCreateInput = { title, status: 'idea' }
+  const input: TopicCreateInput = {
+    title,
+    description: newDescription.value.trim(),
+    targetPlatforms: [...newTargetPlatforms.value],
+    status: 'idea'
+  }
   await window.ohsocial.invoke('topic:create', input)
   newTitle.value = ''
+  newDescription.value = ''
+  newTargetPlatforms.value = []
   showForm.value = false
   await loadTopics()
 }
@@ -42,6 +70,19 @@ async function createTopic() {
 async function updateStatus(topic: Topic, status: string) {
   await window.ohsocial.invoke('topic:update', topic.id, { status })
   await loadTopics()
+}
+
+async function saveTopicPlatforms(topic: Topic) {
+  await window.ohsocial.invoke('topic:update', topic.id, {
+    targetPlatforms: [...editTargetPlatforms.value]
+  })
+  editingTopicId.value = null
+  await loadTopics()
+}
+
+function startEditPlatforms(topic: Topic) {
+  editingTopicId.value = topic.id
+  editTargetPlatforms.value = [...topic.targetPlatforms]
 }
 
 async function deleteTopic(id: number) {
@@ -52,7 +93,10 @@ async function deleteTopic(id: number) {
 
 async function aiRecommend() {
   aiLoading.value = true
-  const r = (await window.ohsocial.invoke('topic:recommend')) as { success: boolean; error?: string }
+  const r = (await window.ohsocial.invoke(
+    'topic:recommend',
+    filterPlatform.value || undefined
+  )) as { success: boolean; error?: string }
   aiLoading.value = false
   if (r.success) await loadTopics()
   else if (r.error) alert(r.error)
@@ -91,7 +135,12 @@ watch(viewMode, () => {
   loadTopics()
 })
 
-onMounted(loadTopics)
+watch(filterPlatform, () => loadTopics())
+
+onMounted(async () => {
+  await loadPlatforms()
+  await loadTopics()
+})
 </script>
 
 <template>
@@ -99,41 +148,85 @@ onMounted(loadTopics)
     <header class="flex items-center justify-between mb-6 flex-wrap gap-2">
       <div>
         <h2 class="text-2xl font-bold">选题</h2>
-        <p class="text-base-content/60 text-sm mt-1">选题 → 开始创作 → 排期发布</p>
+        <p class="text-base-content/60 text-sm mt-1">按平台管理选题 → 开始创作 → 排期发布</p>
       </div>
       <div class="flex gap-2 flex-wrap">
         <div class="join">
           <button class="btn btn-sm join-item" :class="{ 'btn-active': viewMode === 'kanban' }" @click="viewMode = 'kanban'">看板</button>
           <button class="btn btn-sm join-item" :class="{ 'btn-active': viewMode === 'list' }" @click="viewMode = 'list'">列表</button>
         </div>
-        <button class="btn btn-outline btn-sm" :disabled="aiLoading" @click="aiRecommend">AI 推荐选题</button>
+        <button class="btn btn-outline btn-sm" :disabled="aiLoading" @click="aiRecommend">
+          {{ filterPlatform ? `AI 推荐（${platformLabel(filterPlatform)}）` : 'AI 推荐选题' }}
+        </button>
         <button class="btn btn-primary btn-sm" @click="showForm = !showForm">
           添加选题
         </button>
       </div>
     </header>
 
+    <div role="tablist" class="tabs tabs-boxed mb-4 w-fit h-auto gap-1">
+      <button
+        type="button"
+        role="tab"
+        class="tab tab-sm"
+        :class="{ 'tab-active': !filterPlatform }"
+        @click="filterPlatform = ''"
+      >
+        全部平台
+      </button>
+      <button
+        v-for="p in platforms"
+        :key="p.id"
+        type="button"
+        role="tab"
+        class="tab tab-sm"
+        :class="{ 'tab-active': filterPlatform === p.id }"
+        @click="filterPlatform = p.id"
+      >
+        {{ p.name }}
+      </button>
+    </div>
+
     <div v-if="showForm" class="card bg-base-200 mb-4">
-      <div class="card-body py-4">
-        <div class="flex gap-2">
-          <input
-            v-model="newTitle"
-            type="text"
-            placeholder="输入选题标题…"
-            class="input input-bordered flex-1"
-            @keyup.enter="createTopic"
-          />
-          <button class="btn btn-primary" :disabled="!newTitle.trim()" @click="createTopic">创建</button>
+      <div class="card-body py-4 space-y-3">
+        <input
+          v-model="newTitle"
+          type="text"
+          placeholder="输入选题标题…"
+          class="input input-bordered w-full"
+          @keyup.enter="createTopic"
+        />
+        <textarea
+          v-model="newDescription"
+          class="textarea textarea-bordered w-full"
+          rows="2"
+          placeholder="选题描述（选填）"
+        />
+        <div class="flex flex-wrap gap-2 items-center">
+          <span class="text-sm text-base-content/60 shrink-0">目标平台：</span>
+          <button
+            v-for="p in platforms"
+            :key="p.id"
+            type="button"
+            class="btn btn-xs"
+            :class="newTargetPlatforms.includes(p.id) ? 'btn-primary' : 'btn-outline'"
+            @click="togglePlatform(newTargetPlatforms, p.id)"
+          >
+            {{ p.name }}
+          </button>
         </div>
+        <button class="btn btn-primary w-fit" :disabled="!newTitle.trim()" @click="createTopic">创建</button>
       </div>
     </div>
 
-    <div v-if="viewMode === 'list'" class="tabs tabs-boxed mb-4 w-fit">
-      <button class="tab" :class="{ 'tab-active': !filterStatus }" @click="filterStatus = ''; loadTopics()">全部</button>
+    <div v-if="viewMode === 'list'" role="tablist" class="tabs tabs-boxed mb-4 w-fit h-auto gap-1">
+      <button type="button" role="tab" class="tab tab-sm" :class="{ 'tab-active': !filterStatus }" @click="filterStatus = ''; loadTopics()">全部</button>
       <button
         v-for="(label, key) in TOPIC_STATUS_LABELS"
         :key="key"
-        class="tab"
+        type="button"
+        role="tab"
+        class="tab tab-sm"
         :class="{ 'tab-active': filterStatus === key }"
         @click="filterStatus = key; loadTopics()"
       >
@@ -147,7 +240,9 @@ onMounted(loadTopics)
 
     <div v-else-if="topics.length === 0" class="text-center py-16 text-base-content/50">
       <p class="text-lg mb-2">选题池是空的</p>
-      <p class="text-sm">点击「添加选题」或使用 AI 推荐</p>
+      <p class="text-sm">
+        {{ filterPlatform ? `${platformLabel(filterPlatform)} 暂无选题，` : '' }}点击「添加选题」或使用 AI 推荐
+      </p>
     </div>
 
     <div v-else-if="viewMode === 'kanban'" class="flex gap-3 overflow-x-auto pb-4">
@@ -164,6 +259,15 @@ onMounted(loadTopics)
             class="p-3 bg-base-100 rounded-box shadow-sm text-sm"
           >
             <p class="font-medium">{{ topic.title }}</p>
+            <div v-if="topic.targetPlatforms.length" class="flex flex-wrap gap-1 mt-1">
+              <span
+                v-for="pid in topic.targetPlatforms"
+                :key="pid"
+                class="badge badge-xs badge-outline"
+              >
+                {{ platformLabel(pid) }}
+              </span>
+            </div>
             <p v-if="topic.aiScore != null" class="text-xs text-primary mt-1">评分 {{ topic.aiScore }}</p>
             <div class="flex gap-1 mt-2 flex-wrap">
               <button
@@ -208,6 +312,51 @@ onMounted(loadTopics)
             <span class="badge badge-ghost badge-sm shrink-0">
               {{ TOPIC_STATUS_LABELS[topic.status] ?? topic.status }}
             </span>
+          </div>
+
+          <div v-if="topic.targetPlatforms.length" class="flex flex-wrap gap-1">
+            <span
+              v-for="pid in topic.targetPlatforms"
+              :key="pid"
+              class="badge badge-sm badge-outline"
+            >
+              {{ platformLabel(pid) }}
+            </span>
+            <button
+              type="button"
+              class="btn btn-xs btn-ghost"
+              @click="startEditPlatforms(topic)"
+            >
+              编辑平台
+            </button>
+          </div>
+          <div v-else class="flex items-center gap-2">
+            <span class="text-xs text-base-content/40">未指定平台</span>
+            <button
+              type="button"
+              class="btn btn-xs btn-ghost"
+              @click="startEditPlatforms(topic)"
+            >
+              指定平台
+            </button>
+          </div>
+
+          <div
+            v-if="editingTopicId === topic.id"
+            class="flex flex-wrap gap-2 items-center p-2 bg-base-100 rounded-box"
+          >
+            <button
+              v-for="p in platforms"
+              :key="p.id"
+              type="button"
+              class="btn btn-xs"
+              :class="editTargetPlatforms.includes(p.id) ? 'btn-primary' : 'btn-outline'"
+              @click="togglePlatform(editTargetPlatforms, p.id)"
+            >
+              {{ p.name }}
+            </button>
+            <button type="button" class="btn btn-xs btn-primary" @click="saveTopicPlatforms(topic)">保存</button>
+            <button type="button" class="btn btn-xs btn-ghost" @click="editingTopicId = null">取消</button>
           </div>
 
           <p v-if="topic.description" class="text-sm text-base-content/65 leading-relaxed break-words">

@@ -44,6 +44,11 @@ const router = createRouter({
       component: () => import('../views/material/MaterialLibrary.vue')
     },
     {
+      path: '/writing-styles',
+      name: 'writing-styles',
+      component: () => import('../views/writing-style/WritingStyleView.vue')
+    },
+    {
       path: '/assistant',
       name: 'assistant',
       component: () => import('../views/assistant/AssistantHub.vue')

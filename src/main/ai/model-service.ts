@@ -1,7 +1,6 @@
 import axios from 'axios'
 import type { ModelChatRequest, ModelChatResponse } from '../../shared/types/model'
-import { PLATFORM_ADAPT_RULES, platformName } from '../platform/rules'
-import type { PlatformId } from '../../shared/constants/platforms'
+import { getPlatformAdaptRules, platformName } from '../platform/rules'
 import { selectModelConfig } from './model-resolve'
 import { openAICompatibleAuthHeaders } from '../../shared/mimo-api-params'
 import {
@@ -10,11 +9,14 @@ import {
   parseDeepSeekProviderOptions
 } from '../../shared/deepseek-api-params'
 import type { AiProgressEmitter } from './ai-progress'
-import { personaDAO } from '../db/dao/persona-dao'
 import { generationLogDAO } from '../db/dao/generation-log-dao'
 import { llmLogger } from '../services/file-logger'
 import { topicDAO } from '../db/dao/topic-dao'
+import { platformAccountDAO } from '../db/dao/platform-account-dao'
+import { writingStyleDAO } from '../db/dao/writing-style-dao'
 import { hotspotDAO } from '../db/dao/hotspot-dao'
+import type { WritingStyleDimensions } from '../../shared/types/writing-style'
+import type { StyleStepRules } from '../../shared/style-step-rules'
 
 export interface StreamCallbacks {
   onDelta?: (delta: string) => void
@@ -33,6 +35,21 @@ function emitStreamDelta(
   if (kind === 'content') callbacks?.onDelta?.(delta)
 }
 
+/** 部分模型 SSE 返回累积全文而非增量，需剥离已接收前缀避免重复追加 */
+function takeStreamIncrement(accumulated: string, incoming: string): string {
+  if (!incoming) return ''
+  if (!accumulated) return incoming
+  if (incoming.startsWith(accumulated)) return incoming.slice(accumulated.length)
+  return incoming
+}
+
+function parseSseDataLines(buffer: string): { lines: string[]; rest: string } {
+  const parts = buffer.split('\n')
+  const rest = parts.pop() ?? ''
+  const lines = parts.filter(l => l.startsWith('data: '))
+  return { lines, rest }
+}
+
 function stripHtml(html: string): string {
   return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
 }
@@ -42,10 +59,9 @@ function stripEmbeddedThinking(text: string): string {
   let result = text
   result = result.replace(/[\s\S]*?<\/think>/gi, '')
   result = result.replace(/[\s\S]*?<\/redacted_reasoning>/gi, '')
-  const hasUnclosedThinking =
-    (/^[\s\S]*$/i.test(result) && !/<\/think>/i.test(result)) ||
-    (/^[\s\S]*$/i.test(result) && !/<\/redacted_reasoning>/i.test(result))
-  if (hasUnclosedThinking) {
+  if (/^[\s\S]*$/i.test(result) && !/<\/think>/i.test(result)) {
+    result = ''
+  } else if (/^[\s\S]*$/i.test(result) && !/<\/redacted_reasoning>/i.test(result)) {
     result = ''
   }
   return result.trim()
@@ -137,17 +153,22 @@ export class ModelService {
 
         let content = ''
         let thinking = ''
+        let sseBuffer = ''
         await new Promise<void>((resolve, reject) => {
           response.data.on('data', (chunk: Buffer) => {
-            const lines = chunk.toString().split('\n').filter(l => l.startsWith('data: '))
+            sseBuffer += chunk.toString()
+            const { lines, rest } = parseSseDataLines(sseBuffer)
+            sseBuffer = rest
             for (const line of lines) {
               const data = line.slice(6).trim()
               if (data === '[DONE]') continue
               try {
                 const parsed = JSON.parse(data)
                 const choice = parsed.choices?.[0]?.delta
-                const thinkingDelta = (choice?.reasoning_content ?? choice?.reasoning ?? '') as string
-                const delta = (choice?.content ?? '') as string
+                const thinkingRaw = (choice?.reasoning_content ?? choice?.reasoning ?? '') as string
+                const contentRaw = (choice?.content ?? '') as string
+                const thinkingDelta = takeStreamIncrement(thinking, thinkingRaw)
+                const delta = takeStreamIncrement(content, contentRaw)
                 if (thinkingDelta) {
                   thinking += thinkingDelta
                   emitStreamDelta(callbacks, thinkingDelta, 'thinking')
@@ -241,30 +262,74 @@ export class ModelService {
     }
   }
 
-  buildPersonaContext(): string {
+  buildWritingStyleContext(styleId?: number | null): string {
+    if (!styleId) return ''
     try {
-      const p = personaDAO.get()
+      const style = writingStyleDAO.getById(styleId)
+      if (!style) return ''
       const parts = [
-        p.domains.length ? `领域：${p.domains.join('、')}` : '',
-        p.audience ? `受众：${p.audience}` : '',
-        p.style ? `风格：${p.style}` : '',
-        p.personaDesc ? `人设：${p.personaDesc}` : ''
+        `【文风：${style.name}】`,
+        style.description ? `说明：${style.description}` : '',
+        style.promptTemplate ? `写作要求：\n${style.promptTemplate}` : '',
+        this.buildDimensionsContext(style.dimensions),
+        this.buildStepRulesContext(style.stepRules),
+        style.referenceText
+          ? `参考范文（请模仿其语气、节奏与表达方式，不要照抄）：\n${style.referenceText.slice(0, 4000)}`
+          : ''
       ].filter(Boolean)
-      return parts.join('\n')
+      return parts.join('\n\n')
     } catch {
       return ''
     }
   }
 
+  private buildDimensionsContext(dimensions?: WritingStyleDimensions): string {
+    if (!dimensions) return ''
+    const lines: string[] = []
+    if (dimensions.sentenceRhythm) lines.push(`句式节奏：${dimensions.sentenceRhythm}`)
+    if (dimensions.dialogueStyle) lines.push(`对话风格：${dimensions.dialogueStyle}`)
+    if (dimensions.narrativeDistance) lines.push(`叙事距离：${dimensions.narrativeDistance}`)
+    if (dimensions.rhetoricPrefs?.length) lines.push(`修辞偏好：${dimensions.rhetoricPrefs.join('、')}`)
+    if (dimensions.pacing) lines.push(`行文节奏：${dimensions.pacing}`)
+    if (dimensions.vocabularyNotes) lines.push(`用词特征：${dimensions.vocabularyNotes}`)
+    if (dimensions.taboos?.length) lines.push(`禁忌用词/表达：${dimensions.taboos.join('、')}`)
+    return lines.length ? `文风维度指标：\n${lines.join('\n')}` : ''
+  }
+
+  private buildStepRulesContext(stepRules?: StyleStepRules | null): string {
+    if (!stepRules) return ''
+    const lines: string[] = []
+    if (stepRules.identity?.emotional_core?.length) {
+      lines.push(`情感内核：${stepRules.identity.emotional_core.join('、')}`)
+    }
+    if (stepRules.decision_rules?.length) {
+      lines.push(`写作决策规则：\n${stepRules.decision_rules.map(r => `- ${r}`).join('\n')}`)
+    }
+    if (stepRules.quality_checklist?.length) {
+      lines.push(`质量自检清单：\n${stepRules.quality_checklist.map(r => `- ${r}`).join('\n')}`)
+    }
+    return lines.length ? `文风高级规则：\n${lines.join('\n\n')}` : ''
+  }
+
   async generateWriting(
     title: string,
     brief: string,
-    callbacks?: StreamCallbacks
+    callbacks?: StreamCallbacks,
+    writingStyleId?: number | null
   ): Promise<ModelChatResponse> {
-    const persona = this.buildPersonaContext()
+    const styleCtx = this.buildWritingStyleContext(writingStyleId)
+    const formatRules = `
+排版规则（必须严格遵守）：
+1. 使用丰富的 HTML 标签构建层次：<h2> 小节标题、<p> 正文段落、<strong> 关键词/重点句、<blockquote> 金句或引言、<ul>/<ol> 要点列举
+2. 每 3-5 个段落设置一个 <h2> 小节标题，让文章有清晰的结构感
+3. 段落精炼：每段 2-4 句话，避免大段堆砌
+4. 适当使用 <strong> 标注核心观点和关键信息（每段最多 1-2 处）
+5. 列举要点时用 <ul><li> 或 <ol><li>，不要用纯文字罗列
+6. 精彩金句或引言使用 <blockquote> 包裹
+7. 直接输出 HTML 正文，不要输出文章大标题、不要解释、不要 markdown 代码块`
     return this.chat({
       step: 'content_generate',
-      systemPrompt: `你是自媒体写作助手。${persona ? `\n创作者定位：\n${persona}` : ''}\n请根据标题与要点独立完成一篇完整文章，由你全权代笔。直接输出正文（HTML 段落，用 <p> 标签），不要标题、不要解释、不要 markdown 代码块。`,
+      systemPrompt: `你是自媒体写作助手。${styleCtx ? `\n\n${styleCtx}` : ''}\n请严格遵循上述文风要求，根据标题与要点独立完成一篇完整文章，由你全权代笔。\n${formatRules}`,
       prompt: `文章标题：${title}${brief ? `\n\n选题要点：\n${brief}` : ''}\n\n请撰写完整正文。`,
       temperature: 0.85,
       maxTokens: 8192
@@ -275,12 +340,13 @@ export class ModelService {
     title: string,
     selectedText: string,
     instruction: string,
-    callbacks?: StreamCallbacks
+    callbacks?: StreamCallbacks,
+    writingStyleId?: number | null
   ): Promise<ModelChatResponse> {
-    const persona = this.buildPersonaContext()
+    const styleCtx = this.buildWritingStyleContext(writingStyleId)
     return this.chat({
       step: 'content_rewrite',
-      systemPrompt: `你是自媒体写作助手。${persona ? `\n创作者定位：\n${persona}` : ''}\n按用户指令改写选中文本，只输出改写结果，不要解释。`,
+      systemPrompt: `你是自媒体写作助手。${styleCtx ? `\n\n${styleCtx}` : ''}\n按用户指令改写选中文本，保留 HTML 排版标签（<p>、<strong>、<blockquote>、<ul> 等），只输出改写结果，不要解释。`,
       prompt: `文章标题：${title}\n选中文本：\n${selectedText}\n\n改写要求：${instruction || '换个说法'}`,
       temperature: 0.7
     }, callbacks)
@@ -292,15 +358,12 @@ export class ModelService {
     targetPlatform: string,
     callbacks?: StreamCallbacks
   ): Promise<ModelChatResponse> {
-    const rules = PLATFORM_ADAPT_RULES[targetPlatform as PlatformId]
-    if (!rules) {
-      return { success: false, content: '', error: `不支持的平台：${targetPlatform}` }
-    }
-    const persona = this.buildPersonaContext()
+    const rules = getPlatformAdaptRules(targetPlatform)
+    const platformCtx = this.buildPlatformContext(targetPlatform)
     const plain = stripHtml(bodyHtml)
     return this.chat({
       step: 'platform_adapt',
-      systemPrompt: `你是自媒体多平台内容改写专家。${persona ? `\n创作者定位：\n${persona}` : ''}\n只输出改写后的正文（HTML 用 <p> 标签），不要解释。`,
+      systemPrompt: `你是自媒体多平台内容改写专家。${platformCtx}\n只输出改写后的正文（使用丰富 HTML 标签：<p> 段落、<h2> 小节标题、<strong> 强调、<blockquote> 金句、<ul>/<ol> 列表），不要解释。`,
       prompt: `将以下内容改写为【${platformName(targetPlatform)}】版本。
 
 改写规则：
@@ -315,33 +378,70 @@ ${plain}`,
     }, callbacks)
   }
 
-  async recommendTopics(count = 5, callbacks?: StreamCallbacks): Promise<ModelChatResponse> {
-    const persona = this.buildPersonaContext()
+  private buildPlatformContext(platformId?: string): string {
+    if (!platformId) return ''
+    const account = platformAccountDAO.getByPlatform(platformId)
+    if (!account) {
+      return `\n目标平台：${platformName(platformId)}`
+    }
+    const keywords = account.contentKeywords.length ? account.contentKeywords.join('、') : '未配置'
+    return `
+目标平台：${platformName(platformId)}
+内容领域：${account.contentDomain || '未配置'}
+领域关键词：${keywords}
+运营方向：${account.contentBrief || '未配置'}`
+  }
+
+  async recommendTopics(
+    count = 5,
+    callbacks?: StreamCallbacks,
+    platformId?: string
+  ): Promise<ModelChatResponse> {
+    const platformContext = this.buildPlatformContext(platformId)
     const hotspots = hotspotDAO.list(10).map(h => h.title).join('、')
-    const existing = topicDAO.list().slice(0, 15).map(t => t.title).join('、')
+    const existing = topicDAO
+      .list(platformId ? { platform: platformId } : undefined)
+      .slice(0, 15)
+      .map(t => t.title)
+      .join('、')
+    const platformFields = platformId
+      ? 'title、description、domain 字段'
+      : 'title、description、domain、targetPlatforms（平台 id 数组，如 ["wechat"]）字段'
     return this.chat({
       step: 'topic_recommend',
-      systemPrompt: `你是自媒体选题策划。${persona ? `\n创作者：\n${persona}` : ''}\n输出 JSON 数组，每项含 title、description、domain 字段，不要 markdown 代码块。`,
-      prompt: `请推荐 ${count} 个新选题。${hotspots ? `\n近期热点：${hotspots}` : ''}${existing ? `\n已有选题（避免重复）：${existing}` : ''}`,
+      systemPrompt: `你是自媒体选题策划。${platformContext}\n输出 JSON 数组，每项含 ${platformFields}，不要 markdown 代码块。`,
+      prompt: `请推荐 ${count} 个新选题。${platformId ? `\n选题必须适合【${platformName(platformId)}】平台及其内容领域。` : ''}${hotspots ? `\n近期热点：${hotspots}` : ''}${existing ? `\n已有选题（避免重复）：${existing}` : ''}`,
       temperature: 0.85
     }, callbacks)
   }
 
-  async scoreTopic(title: string, description: string, callbacks?: StreamCallbacks): Promise<ModelChatResponse> {
-    const persona = this.buildPersonaContext()
+  async scoreTopic(
+    title: string,
+    description: string,
+    callbacks?: StreamCallbacks,
+    targetPlatforms: string[] = []
+  ): Promise<ModelChatResponse> {
+    let platformContext = ''
+    if (targetPlatforms.length > 0) {
+      const parts = targetPlatforms.map(id => {
+        const account = platformAccountDAO.getByPlatform(id)
+        if (!account) return `${platformName(id)}：未配置内容领域`
+        return `${platformName(id)}：${account.contentDomain || '未配置领域'}（${account.contentBrief || '无运营说明'}）`
+      })
+      platformContext = `\n目标平台及领域定位：\n${parts.join('\n')}`
+    }
     return this.chat({
       step: 'topic_score',
-      systemPrompt: `你是选题评估专家。${persona ? `\n创作者：\n${persona}` : ''}\n输出 JSON：{"score":0-100,"reason":"..."}`,
-      prompt: `评估选题：\n标题：${title}\n描述：${description || '无'}`,
+      systemPrompt: `你是选题评估专家。评估时重点考虑选题与目标平台内容领域的匹配度。输出 JSON：{"score":0-100,"reason":"..."}`,
+      prompt: `评估选题：\n标题：${title}\n描述：${description || '无'}${platformContext}`,
       temperature: 0.5
     }, callbacks)
   }
 
   async suggestSchedule(weekSummary: string, callbacks?: StreamCallbacks): Promise<ModelChatResponse> {
-    const persona = this.buildPersonaContext()
     return this.chat({
       step: 'schedule_suggest',
-      systemPrompt: `你是内容排期顾问。${persona ? `\n创作者：\n${persona}` : ''}\n给出本周排期建议（Markdown 列表，含日期、平台、内容类型）。`,
+      systemPrompt: '你是内容排期顾问。给出本周排期建议（Markdown 列表，含日期、平台、内容类型）。',
       prompt: `当前排期概况：\n${weekSummary || '暂无排期'}`,
       temperature: 0.7
     }, callbacks)
@@ -357,10 +457,9 @@ ${plain}`,
   }
 
   async generateTitles(bodyPlain: string, callbacks?: StreamCallbacks): Promise<ModelChatResponse> {
-    const persona = this.buildPersonaContext()
     return this.chat({
       step: 'title_generate',
-      systemPrompt: `你是标题专家。${persona ? `\n创作者：\n${persona}` : ''}\n输出 5 个标题，每行一个，不要编号说明。`,
+      systemPrompt: '你是标题专家。输出 5 个标题，每行一个，不要编号说明。',
       prompt: `正文摘要：\n${bodyPlain.slice(0, 1500)}`,
       temperature: 0.9
     }, callbacks)

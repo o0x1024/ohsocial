@@ -11,6 +11,7 @@ const navItems = [
   { path: '/contents', icon: 'pen-to-square', label: '创作' },
   { path: '/schedule', icon: 'calendar-days', label: '排期' },
   { path: '/materials', icon: 'folder', label: '素材' },
+  { path: '/writing-styles', icon: 'font', label: '文风' },
   { path: '/assistant', icon: 'robot', label: 'AI 助手' },
   { path: '/settings', icon: 'cog', label: '设置' }
 ]

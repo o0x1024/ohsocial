@@ -1,7 +1,7 @@
 import { topicDAO } from '../db/dao/topic-dao'
 import { contentDAO } from '../db/dao/content-dao'
 import { materialDAO } from '../db/dao/material-dao'
-import { personaDAO } from '../db/dao/persona-dao'
+import { platformAccountDAO } from '../db/dao/platform-account-dao'
 import { webSearch } from '../services/web-search'
 import { fetchUrlSummary } from '../services/fetch-url'
 
@@ -32,8 +32,8 @@ export async function executeTool(
       if (!q) return materialDAO.list().slice(0, 10)
       return materialDAO.search(q)
     }
-    case 'get_persona':
-      return personaDAO.get()
+    case 'list_platforms':
+      return platformAccountDAO.list()
     case 'create_topic': {
       const title = String(args.title ?? '')
       if (!title) return { error: '缺少 title' }
@@ -115,8 +115,8 @@ export const TOOL_SCHEMAS = [
   {
     type: 'function',
     function: {
-      name: 'get_persona',
-      description: '获取创作者个人定位配置',
+      name: 'list_platforms',
+      description: '获取各平台账号与内容领域定位',
       parameters: { type: 'object', properties: {} }
     }
   },

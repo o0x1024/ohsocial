@@ -1,0 +1,97 @@
+/* 拖拽手柄（tiptap-extension-global-drag-handle） */
+.drag-handle {
+  opacity: 0.35;
+  transition: opacity 0.15s ease;
+}
+.ProseMirror:hover .drag-handle {
+  opacity: 0.7;
+}
+
+/* 专注模式 */
+.editor-focus-mode .ProseMirror > *:not(.has-focus) {
+  opacity: 0.38;
+  transition: opacity 0.2s ease;
+}
+.editor-focus-mode .ProseMirror > .has-focus {
+  opacity: 1;
+}
+
+/* 批注高亮 */
+.editor-comment-mark {
+  background-color: oklch(var(--wa) / 0.22);
+  border-bottom: 2px solid oklch(var(--wa) / 0.55);
+  cursor: pointer;
+}
+
+/* 链接 */
+.tiptap-editor .ProseMirror a.editor-link {
+  color: oklch(var(--p));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* 图片 */
+.tiptap-editor .ProseMirror img.editor-image {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--radius-box, 0.5rem);
+  margin: 1rem auto;
+  display: block;
+}
+
+/* 表格 */
+.tiptap-editor .ProseMirror table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  font-size: 0.875rem;
+}
+.tiptap-editor .ProseMirror th,
+.tiptap-editor .ProseMirror td {
+  border: 1px solid oklch(var(--bc) / 0.15);
+  padding: 0.5rem 0.75rem;
+  vertical-align: top;
+}
+.tiptap-editor .ProseMirror th {
+  background: oklch(var(--b2) / 0.5);
+  font-weight: 600;
+}
+
+/* 任务列表 */
+.tiptap-editor .ProseMirror ul[data-type='taskList'] {
+  list-style: none;
+  padding-left: 0.25rem;
+}
+.tiptap-editor .ProseMirror ul[data-type='taskList'] li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+.tiptap-editor .ProseMirror ul[data-type='taskList'] li label {
+  margin-top: 0.2rem;
+}
+
+/* 代码块语法高亮 */
+.tiptap-editor .ProseMirror pre {
+  @apply bg-base-300 rounded-lg p-4 my-4 overflow-x-auto text-sm;
+}
+.tiptap-editor .ProseMirror pre code {
+  @apply bg-transparent p-0 font-mono;
+}
+
+/* Bubble menu 层级 */
+.editor-bubble-menu {
+  z-index: 40;
+}
+
+/* Placeholder */
+.ProseMirror p.is-editor-empty:first-child::before,
+.ProseMirror h2.is-empty::before,
+.ProseMirror h3.is-empty::before,
+.ProseMirror blockquote p.is-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: oklch(var(--bc) / 0.4);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}

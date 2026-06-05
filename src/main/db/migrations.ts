@@ -1,4 +1,27 @@
 import type Database from 'better-sqlite3'
+import { backfillPlatformDisplayNames, seedBuiltinPlatformAccounts } from './platform-seed'
+
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  return db.prepare(`PRAGMA table_info(${table})`).all().some((c: { name: string }) => c.name === column)
+}
+
+function ensurePlatformAccountContentProfile(db: Database.Database): void {
+  if (!hasColumn(db, 'platform_accounts', 'content_domain')) {
+    db.exec(`ALTER TABLE platform_accounts ADD COLUMN content_domain TEXT DEFAULT ''`)
+  }
+  if (!hasColumn(db, 'platform_accounts', 'content_keywords')) {
+    db.exec(`ALTER TABLE platform_accounts ADD COLUMN content_keywords TEXT DEFAULT '[]'`)
+  }
+  if (!hasColumn(db, 'platform_accounts', 'content_brief')) {
+    db.exec(`ALTER TABLE platform_accounts ADD COLUMN content_brief TEXT DEFAULT ''`)
+  }
+  if (!hasColumn(db, 'platform_accounts', 'display_name')) {
+    db.exec(`ALTER TABLE platform_accounts ADD COLUMN display_name TEXT DEFAULT ''`)
+  }
+  if (!hasColumn(db, 'platform_accounts', 'is_builtin')) {
+    db.exec(`ALTER TABLE platform_accounts ADD COLUMN is_builtin INTEGER DEFAULT 0`)
+  }
+}
 
 export function ensureIncrementalMigrations(db: Database.Database): void {
   db.exec(`
@@ -73,11 +96,16 @@ export function ensureIncrementalMigrations(db: Database.Database): void {
 
     CREATE TABLE IF NOT EXISTS platform_accounts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      platform TEXT NOT NULL,
+      platform TEXT NOT NULL UNIQUE,
+      display_name TEXT DEFAULT '',
       account_name TEXT DEFAULT '',
       account_id TEXT DEFAULT '',
       followers INTEGER DEFAULT 0,
       notes TEXT DEFAULT '',
+      content_domain TEXT DEFAULT '',
+      content_keywords TEXT DEFAULT '[]',
+      content_brief TEXT DEFAULT '',
+      is_builtin INTEGER DEFAULT 0,
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -144,5 +172,23 @@ export function ensureIncrementalMigrations(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_contents_parent_id ON contents(parent_id);
     CREATE INDEX IF NOT EXISTS idx_materials_type ON materials(type);
     CREATE INDEX IF NOT EXISTS idx_content_versions_content_id ON content_versions(content_id);
+
+    CREATE TABLE IF NOT EXISTS writing_styles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT DEFAULT '',
+      prompt_template TEXT NOT NULL,
+      reference_text TEXT DEFAULT '',
+      dimensions_json TEXT DEFAULT '{}',
+      step_rules_json TEXT,
+      source TEXT DEFAULT 'manual',
+      is_default INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `)
+
+  ensurePlatformAccountContentProfile(db)
+  seedBuiltinPlatformAccounts(db)
+  backfillPlatformDisplayNames(db)
 }

@@ -1,64 +1,131 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import type { Persona, PersonaUpdateInput } from '../../../../shared/types/persona'
-import { PLATFORMS } from '../../../../shared/constants/platforms'
+import type { PlatformAccount } from '../../../../shared/types/platform-account'
 
 const emit = defineEmits<{ toast: [type: 'success' | 'error' | 'info', message: string] }>()
 
-type AccountFields = { accountName: string; accountId: string; followers: number; notes: string }
-
-function emptyAccount(): AccountFields {
-  return { accountName: '', accountId: '', followers: 0, notes: '' }
+type AccountFields = {
+  displayName: string
+  accountName: string
+  accountId: string
+  followers: number
+  notes: string
+  contentDomain: string
+  contentKeywordsText: string
+  contentBrief: string
 }
 
-function createEmptyAccountForm(): Record<string, AccountFields> {
-  return Object.fromEntries(PLATFORMS.map(p => [p.id, emptyAccount()]))
+function emptyAccount(displayName = ''): AccountFields {
+  return {
+    displayName,
+    accountName: '',
+    accountId: '',
+    followers: 0,
+    notes: '',
+    contentDomain: '',
+    contentKeywordsText: '',
+    contentBrief: ''
+  }
 }
 
-const persona = ref<Persona | null>(null)
-const domainsText = ref('')
 const serperKey = ref('')
-const accountForm = ref<Record<string, AccountFields>>(createEmptyAccountForm())
+const platformAccounts = ref<PlatformAccount[]>([])
+const accountForm = ref<Record<string, AccountFields>>({})
 const ready = ref(false)
 const customSkills = ref<Array<{ skillId: string; name: string }>>([])
 const skillForm = ref({ skillId: '', name: '', content: '' })
 const saving = ref(false)
+const newPlatformName = ref('')
+const addingPlatform = ref(false)
+
+function syncFormFromAccounts(accounts: PlatformAccount[]) {
+  const next: Record<string, AccountFields> = {}
+  for (const acc of accounts) {
+    next[acc.platform] = {
+      displayName: acc.displayName || acc.platform,
+      accountName: acc.accountName,
+      accountId: acc.accountId,
+      followers: acc.followers,
+      notes: acc.notes,
+      contentDomain: acc.contentDomain,
+      contentKeywordsText: (acc.contentKeywords ?? []).join('、'),
+      contentBrief: acc.contentBrief
+    }
+  }
+  accountForm.value = next
+}
+
+async function loadAccounts() {
+  platformAccounts.value = (await window.ohsocial.invoke('account:list')) as PlatformAccount[]
+  syncFormFromAccounts(platformAccounts.value)
+}
 
 onMounted(async () => {
-  persona.value = (await window.ohsocial.invoke('persona:get')) as Persona
-  domainsText.value = persona.value.domains.join('、')
   serperKey.value = ((await window.ohsocial.invoke('preference:get', 'serper_api_key')) as string) ?? ''
-  const accounts = (await window.ohsocial.invoke('account:list')) as Array<{ platform: string; accountName: string }>
-  for (const p of PLATFORMS) {
-    const acc = accounts.find(a => a.platform === p.id)
-    accountForm.value[p.id] = { accountName: acc?.accountName ?? '', accountId: '', followers: 0, notes: '' }
-  }
+  await loadAccounts()
   customSkills.value = (await window.ohsocial.invoke('skill:list')) as typeof customSkills.value
   ready.value = true
 })
 
+async function addPlatform() {
+  const name = newPlatformName.value.trim()
+  if (!name) return
+  addingPlatform.value = true
+  try {
+    const r = (await window.ohsocial.invoke('account:create', name)) as {
+      success: boolean
+      error?: string
+    }
+    if (!r.success) {
+      emit('toast', 'error', r.error ?? '添加失败')
+      return
+    }
+    newPlatformName.value = ''
+    await loadAccounts()
+    emit('toast', 'success', '平台已添加')
+  } finally {
+    addingPlatform.value = false
+  }
+}
+
+async function removePlatform(platform: string) {
+  const acc = platformAccounts.value.find(a => a.platform === platform)
+  const label = acc?.displayName || platform
+  if (!confirm(`确定删除平台「${label}」？`)) return
+  const r = (await window.ohsocial.invoke('account:delete', platform)) as {
+    success: boolean
+    error?: string
+  }
+  if (!r.success) {
+    emit('toast', 'error', r.error ?? '删除失败')
+    return
+  }
+  await loadAccounts()
+  emit('toast', 'success', '平台已删除')
+}
+
 async function save() {
-  if (!persona.value) return
   saving.value = true
   try {
-    const input: PersonaUpdateInput = {
-      domains: domainsText.value.split(/[、,，]/).map(s => s.trim()).filter(Boolean),
-      audience: persona.value.audience,
-      style: persona.value.style,
-      personaDesc: persona.value.personaDesc,
-      differentiator: persona.value.differentiator
-    }
-    persona.value = (await window.ohsocial.invoke('persona:update', input)) as Persona
     await window.ohsocial.invoke('preference:set', 'serper_api_key', serperKey.value)
-    for (const p of PLATFORMS) {
-      const acc = accountForm.value[p.id]
-      await window.ohsocial.invoke('account:upsert', p.id, {
-        accountName: acc.accountName,
-        accountId: acc.accountId,
-        followers: acc.followers,
-        notes: acc.notes
+    for (const acc of platformAccounts.value) {
+      const form = accountForm.value[acc.platform]
+      if (!form) continue
+      await window.ohsocial.invoke('account:upsert', acc.platform, {
+        displayName: form.displayName.trim() || acc.platform,
+        accountName: form.accountName,
+        accountId: form.accountId,
+        followers: form.followers,
+        notes: form.notes,
+        contentDomain: form.contentDomain,
+        contentKeywords: form.contentKeywordsText
+          .split(/[、,，]/)
+          .map(s => s.trim())
+          .filter(Boolean),
+        contentBrief: form.contentBrief
       })
     }
+    await loadAccounts()
     emit('toast', 'success', '运营配置已保存')
   } catch (e) {
     emit('toast', 'error', e instanceof Error ? e.message : '保存失败')
@@ -83,17 +150,7 @@ async function saveSkill() {
   <div v-else class="space-y-4">
     <div class="mb-2">
       <h3 class="text-xl font-bold">运营配置</h3>
-      <p class="text-sm text-base-content/50 mt-1">创作偏好、平台账号与助手能力</p>
-    </div>
-
-    <div v-if="persona" class="card bg-base-100 shadow-sm border border-base-300/60">
-      <div class="card-body p-6 space-y-4">
-        <h4 class="font-semibold text-sm">创作偏好</h4>
-        <input v-model="domainsText" class="input input-bordered w-full" placeholder="内容领域" />
-        <textarea v-model="persona.audience" class="textarea textarea-bordered w-full" rows="2" placeholder="目标受众" />
-        <input v-model="persona.style" class="input input-bordered w-full" placeholder="内容风格" />
-        <textarea v-model="persona.personaDesc" class="textarea textarea-bordered w-full" rows="2" placeholder="人设描述" />
-      </div>
+      <p class="text-sm text-base-content/50 mt-1">平台账号、内容定位与助手能力</p>
     </div>
 
     <div class="card bg-base-100 shadow-sm border border-base-300/60">
@@ -104,11 +161,75 @@ async function saveSkill() {
     </div>
 
     <div class="card bg-base-100 shadow-sm border border-base-300/60">
-      <div class="card-body p-6 space-y-3">
-        <h4 class="font-semibold text-sm">平台账号</h4>
-        <div v-for="p in PLATFORMS" :key="p.id" class="flex gap-2 items-center">
-          <span class="text-sm w-20 shrink-0">{{ p.name }}</span>
-          <input v-model="accountForm[p.id].accountName" class="input input-bordered input-sm flex-1" />
+      <div class="card-body p-6 space-y-4">
+        <div>
+          <h4 class="font-semibold text-sm">平台账号与内容定位</h4>
+          <p class="text-xs text-base-content/50 mt-1">为每个平台配置运营领域，支持自定义添加或删除平台</p>
+        </div>
+
+        <div class="flex gap-2 flex-wrap items-end">
+          <div class="flex-1 min-w-[12rem]">
+            <input
+              v-model="newPlatformName"
+              class="input input-bordered input-sm w-full"
+              placeholder="新平台名称，如知乎、视频号"
+              @keyup.enter="addPlatform"
+            />
+          </div>
+          <button
+            type="button"
+            class="btn btn-sm btn-outline"
+            :disabled="addingPlatform || !newPlatformName.trim()"
+            @click="addPlatform"
+          >
+            {{ addingPlatform ? '添加中…' : '添加平台' }}
+          </button>
+        </div>
+
+        <p v-if="platformAccounts.length === 0" class="text-sm text-base-content/50">
+          暂无平台，请先添加
+        </p>
+
+        <div
+          v-for="acc in platformAccounts"
+          :key="acc.platform"
+          class="p-4 rounded-box bg-base-200/50 space-y-2"
+        >
+          <div class="flex gap-2 items-center flex-wrap">
+            <input
+              v-model="accountForm[acc.platform].displayName"
+              class="input input-bordered input-sm flex-1 min-w-[8rem]"
+              placeholder="平台名称"
+            />
+            <input
+              v-model="accountForm[acc.platform].accountName"
+              class="input input-bordered input-sm flex-1 min-w-[8rem]"
+              placeholder="账号名称"
+            />
+            <button
+              type="button"
+              class="btn btn-sm btn-ghost text-error shrink-0"
+              @click="removePlatform(acc.platform)"
+            >
+              删除
+            </button>
+          </div>
+          <input
+            v-model="accountForm[acc.platform].contentDomain"
+            class="input input-bordered input-sm w-full"
+            placeholder="内容领域，如旅游攻略 / 网络安全"
+          />
+          <input
+            v-model="accountForm[acc.platform].contentKeywordsText"
+            class="input input-bordered input-sm w-full"
+            placeholder="领域关键词，用顿号分隔"
+          />
+          <textarea
+            v-model="accountForm[acc.platform].contentBrief"
+            class="textarea textarea-bordered textarea-sm w-full"
+            rows="2"
+            placeholder="运营方向说明（选填）"
+          />
         </div>
       </div>
     </div>

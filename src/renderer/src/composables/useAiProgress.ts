@@ -1,4 +1,4 @@
-import { onMounted, onUnmounted, readonly, ref } from 'vue'
+import { readonly, ref } from 'vue'
 
 export type AiProgressPhase = 'idle' | 'running' | 'success' | 'error'
 
@@ -9,12 +9,14 @@ const contentText = ref('')
 const thinkingText = ref('')
 const modelName = ref('')
 const phase = ref<AiProgressPhase>('idle')
+const folded = ref(false)
 const errorMessage = ref('')
 const elapsedSeconds = ref(0)
 
 let activeTaskId: string | null = null
 let hideTimer: ReturnType<typeof setTimeout> | null = null
 let elapsedTimer: ReturnType<typeof setInterval> | null = null
+let listenersAttached = false
 
 function clearHideTimer() {
   if (hideTimer) {
@@ -56,6 +58,7 @@ function onTaskStart(payload: unknown) {
   clearElapsedTimer()
   activeTaskId = p.taskId
   phase.value = 'running'
+  folded.value = false
   visible.value = true
   resetOutput()
   label.value = p.label ?? 'AI 处理中'
@@ -96,7 +99,34 @@ function onTaskEnd(payload: unknown) {
   }
   phase.value = 'success'
   statusText.value = '已完成'
-  scheduleHide()
+  folded.value = true
+}
+
+function detachListeners() {
+  if (!listenersAttached) return
+  listenersAttached = false
+  window.ohsocial.off('ai:task-start', onTaskStart)
+  window.ohsocial.off('ai:status', onStatus)
+  window.ohsocial.off('ai:delta', onDelta)
+  window.ohsocial.off('ai:task-end', onTaskEnd)
+}
+
+/** 全局只注册一次；先 off 再 on，避免 HMR / 多组件重复挂载导致 delta 被追加多次 */
+export function initAiProgressBridge() {
+  detachListeners()
+  listenersAttached = true
+  window.ohsocial.on('ai:task-start', onTaskStart)
+  window.ohsocial.on('ai:status', onStatus)
+  window.ohsocial.on('ai:delta', onDelta)
+  window.ohsocial.on('ai:task-end', onTaskEnd)
+}
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    detachListeners()
+    clearHideTimer()
+    clearElapsedTimer()
+  })
 }
 
 async function cancelTask() {
@@ -109,36 +139,16 @@ function dismiss() {
   clearElapsedTimer()
   visible.value = false
   phase.value = 'idle'
+  folded.value = false
   activeTaskId = null
   resetOutput()
 }
 
-let started = false
+function expandPanel() {
+  folded.value = false
+}
 
 export function useAiProgress() {
-  function bindListeners() {
-    if (started) return
-    started = true
-    window.ohsocial.on('ai:task-start', onTaskStart)
-    window.ohsocial.on('ai:status', onStatus)
-    window.ohsocial.on('ai:delta', onDelta)
-    window.ohsocial.on('ai:task-end', onTaskEnd)
-  }
-
-  function unbindListeners() {
-    if (!started) return
-    started = false
-    window.ohsocial.off('ai:task-start', onTaskStart)
-    window.ohsocial.off('ai:status', onStatus)
-    window.ohsocial.off('ai:delta', onDelta)
-    window.ohsocial.off('ai:task-end', onTaskEnd)
-    clearHideTimer()
-    clearElapsedTimer()
-  }
-
-  onMounted(bindListeners)
-  onUnmounted(unbindListeners)
-
   return {
     visible: readonly(visible),
     label: readonly(label),
@@ -147,11 +157,11 @@ export function useAiProgress() {
     thinkingText: readonly(thinkingText),
     modelName: readonly(modelName),
     phase: readonly(phase),
+    folded: readonly(folded),
     errorMessage: readonly(errorMessage),
     elapsedSeconds: readonly(elapsedSeconds),
     cancelTask,
     dismiss,
-    bindListeners,
-    unbindListeners
+    expandPanel
   }
 }

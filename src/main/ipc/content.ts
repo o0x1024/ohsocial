@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import type { ContentCreateInput, ContentUpdateInput } from '../../shared/types/content'
-import { contentDAO, topicDAO } from '../db'
+import { contentDAO, platformAccountDAO, topicDAO, writingStyleDAO } from '../db'
 import { modelService } from '../ai/model-service'
 import { runWithAiProgress } from './ai-progress-runner'
 
@@ -11,8 +11,34 @@ function streamCallbacks(
   return { progress, deltaLegacy: legacy, signal: progress?.signal }
 }
 
+export interface ContentListFilter {
+  status?: string
+  platform?: string
+}
+
+function filterContentsByPlatform(
+  items: ReturnType<typeof contentDAO.list>,
+  platform?: string
+) {
+  if (!platform) return items
+  const topicMap = new Map(topicDAO.list().map(topic => [topic.id, topic]))
+  return items.filter(item => {
+    if (item.platform === platform) return true
+    if (item.platform !== 'origin') return false
+    if (!item.topicId) return false
+    const topic = topicMap.get(item.topicId)
+    if (!topic) return false
+    return topic.targetPlatforms.includes(platform)
+  })
+}
+
 export function registerContentHandlers(): void {
-  ipcMain.handle('content:list', (_e, status?: string) => contentDAO.list(status))
+  ipcMain.handle('content:list', (_e, filter?: ContentListFilter | string) => {
+    const resolved: ContentListFilter =
+      typeof filter === 'string' ? { status: filter } : (filter ?? {})
+    const items = contentDAO.list(resolved.status)
+    return filterContentsByPlatform(items, resolved.platform)
+  })
 
   ipcMain.handle('content:get', (_e, id: number) => contentDAO.getById(id))
 
@@ -28,11 +54,26 @@ export function registerContentHandlers(): void {
       }
       return { success: true, content: existing, created: false }
     }
-    const content = contentDAO.create({
+    const defaultStyle = writingStyleDAO.list().find(s => s.isDefault)
+    let contentDomain = topic.domain
+    if (!contentDomain && topic.targetPlatforms.length === 1) {
+      const account = platformAccountDAO.getByPlatform(topic.targetPlatforms[0])
+      contentDomain = account?.contentDomain ?? ''
+    }
+    const meta: Record<string, unknown> = {
+      targetPlatforms: topic.targetPlatforms,
+      contentDomain: contentDomain || undefined,
+      sourcePlatform:
+        topic.targetPlatforms.length === 1 ? topic.targetPlatforms[0] : undefined
+    }
+    if (defaultStyle) meta.writingStyleId = defaultStyle.id
+
+    let content = contentDAO.create({
       title: topic.title,
       topicId,
       body: topic.description || topic.notes || ''
     })
+    content = contentDAO.update(content.id, { meta }) ?? content
     topicDAO.update(topicId, { status: 'writing' })
     return { success: true, content, created: true }
   })
@@ -105,10 +146,13 @@ export function registerContentHandlers(): void {
             brief = [topic.description, topic.notes].filter(Boolean).join('\n')
           }
         }
+        const writingStyleId =
+          typeof content.meta?.writingStyleId === 'number' ? content.meta.writingStyleId : null
         return modelService.generateWriting(
           content.title,
           brief,
-          streamCallbacks(progress, { contentId, mode: 'generate' })
+          streamCallbacks(progress, { contentId, mode: 'generate' }),
+          writingStyleId
         )
       },
       r => ({ success: r.success, error: r.error })
@@ -124,11 +168,14 @@ export function registerContentHandlers(): void {
         async progress => {
           const content = contentDAO.getById(contentId)
           if (!content) return { success: false, error: '内容不存在' }
+          const writingStyleId =
+            typeof content.meta?.writingStyleId === 'number' ? content.meta.writingStyleId : null
           return modelService.rewriteSelection(
             content.title,
             selectedText,
             instruction,
-            streamCallbacks(progress, { contentId, mode: 'rewrite' })
+            streamCallbacks(progress, { contentId, mode: 'rewrite' }),
+            writingStyleId
           )
         },
         r => ({ success: r.success, error: r.error })

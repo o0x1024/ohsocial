@@ -2,8 +2,14 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import RichTextEditor from '../../components/editor/RichTextEditor.vue'
+import { useAiProgress } from '../../composables/useAiProgress'
+import { toEditorHtml } from '../../utils/editorHtml'
 import type { Content } from '../../../../shared/types/content'
-import { CONTENT_STATUS_LABELS, PLATFORMS } from '../../../../shared/constants/platforms'
+import type { WritingStyle } from '../../../../shared/types/writing-style'
+import type { EditorComment } from '../../../../shared/types/editor'
+import { CONTENT_STATUS_LABELS } from '../../../../shared/constants/platforms'
+import { usePlatformList } from '../../composables/usePlatformList'
+import { diffLines, stripHtml } from '../../../../shared/text-diff'
 
 const route = useRoute()
 const router = useRouter()
@@ -19,12 +25,32 @@ const aiLoading = ref(false)
 const aiStream = ref('')
 const hasModel = ref(false)
 const showAdapt = ref(false)
-const adaptPlatform = ref('xiaohongshu')
+const adaptPlatform = ref('')
+const { platforms, loadPlatforms, platformLabel } = usePlatformList()
+const writingStyles = ref<WritingStyle[]>([])
+const writingStyleId = ref<number | ''>('')
+const editorComments = ref<EditorComment[]>([])
+const lastVersionBody = ref('')
+
+const { contentText: aiContentText } = useAiProgress()
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 let deltaHandler: ((...args: unknown[]) => void) | null = null
+let streamingToEditor = false
 
 const isOrigin = computed(() => content.value && (content.value.platform === 'origin' || !content.value.parentId))
+
+const diffWithLastVersion = computed(() => {
+  if (!lastVersionBody.value) return []
+  return diffLines(stripHtml(lastVersionBody.value), stripHtml(body.value))
+})
+
+async function loadVersionBaseline() {
+  const list = (await window.ohsocial.invoke('version:list', contentId.value)) as {
+    body: string
+  }[]
+  lastVersionBody.value = list[0]?.body ?? ''
+}
 
 async function load() {
   content.value = (await window.ohsocial.invoke('content:get', contentId.value)) as Content | undefined ?? null
@@ -35,19 +61,38 @@ async function load() {
   title.value = content.value.title
   body.value = content.value.body
   status.value = content.value.status
+  writingStyles.value = (await window.ohsocial.invoke('writing-style:list')) as WritingStyle[]
+  const boundId = content.value.meta?.writingStyleId
+  writingStyleId.value = typeof boundId === 'number' ? boundId : ''
+  const rawComments = content.value.meta?.comments
+  editorComments.value = Array.isArray(rawComments) ? (rawComments as EditorComment[]) : []
   const originId = content.value.parentId ?? content.value.id
   versions.value = (await window.ohsocial.invoke('content:list-versions', originId)) as Content[]
+  await loadVersionBaseline()
 }
 
 async function save() {
   if (!content.value) return
   saving.value = true
+  const meta = { ...(content.value.meta ?? {}) }
+  if (writingStyleId.value) {
+    meta.writingStyleId = Number(writingStyleId.value)
+  } else {
+    delete meta.writingStyleId
+  }
+  if (editorComments.value.length) {
+    meta.comments = editorComments.value
+  } else {
+    delete meta.comments
+  }
   content.value = (await window.ohsocial.invoke('content:update', contentId.value, {
     title: title.value,
     body: body.value,
-    status: status.value
+    status: status.value,
+    meta
   })) as Content
   saving.value = false
+  await loadVersionBaseline()
 }
 
 function scheduleSave() {
@@ -55,35 +100,59 @@ function scheduleSave() {
   saveTimer = setTimeout(save, 800)
 }
 
-watch([title, body, status], scheduleSave)
+watch([title, body, status, writingStyleId], scheduleSave)
+watch(editorComments, scheduleSave, { deep: true })
+
+const boundStyleName = computed(() => {
+  if (!writingStyleId.value) return ''
+  return writingStyles.value.find(s => s.id === writingStyleId.value)?.name ?? ''
+})
+
+function applyGeneratedBody(raw: string) {
+  const html = toEditorHtml(raw)
+  if (!html || html === '<p></p>') return false
+  body.value = html
+  return true
+}
 
 async function aiGenerate() {
   if (!content.value || aiLoading.value) return
   const hasBody = body.value.replace(/<[^>]+>/g, '').trim().length > 0
   if (hasBody && !confirm('AI 将重新生成全文并覆盖当前正文，是否继续？')) return
   aiLoading.value = true
+  streamingToEditor = true
   aiStream.value = ''
   await save()
-  const result = (await window.ohsocial.invoke('content:ai-generate', contentId.value)) as {
-    success: boolean
-    content?: string
-    error?: string
+  try {
+    const result = (await window.ohsocial.invoke('content:ai-generate', contentId.value)) as {
+      success?: boolean
+      content?: string
+      error?: string
+    } | undefined
+    const raw = (result?.content || aiContentText.value || aiStream.value || '').trim()
+    if (raw && applyGeneratedBody(raw)) {
+      if (saveTimer) clearTimeout(saveTimer)
+      await save()
+    } else if (result?.error) {
+      alert(result.error)
+    } else if (result?.success === false) {
+      alert('AI 生成失败')
+    } else {
+      alert('模型未返回正文内容')
+    }
+  } finally {
+    aiLoading.value = false
+    streamingToEditor = false
+    aiStream.value = ''
   }
-  if (result.success && result.content) {
-    body.value = result.content
-  } else if (result.error) {
-    alert(result.error)
-  }
-  aiLoading.value = false
-  aiStream.value = ''
 }
 
 function goSchedule() {
   router.push({ path: '/schedule', query: { contentId: String(contentId.value) } })
 }
 
-async function aiRewrite() {
-  const selection = window.getSelection()?.toString().trim()
+async function aiRewrite(selectedText?: string, instruction = '换个说法，更口语化') {
+  const selection = selectedText ?? window.getSelection()?.toString().trim()
   if (!selection) {
     alert('请先选中要改写的文本')
     return
@@ -96,14 +165,24 @@ async function aiRewrite() {
     'content:ai-rewrite',
     contentId.value,
     selection,
-    '换个说法，更口语化'
+    instruction
   )) as { success: boolean; content?: string; error?: string }
   if (result.success && result.content) {
-    body.value = body.value.replace(selection, result.content)
+    const replacement = toEditorHtml(result.content)
+    const plainReplacement = result.content.replace(/<[^>]+>/g, '').trim()
+    if (body.value.includes(selection)) {
+      body.value = body.value.replace(selection, plainReplacement.includes('<') ? replacement : result.content)
+    } else {
+      body.value = body.value.replace(selection, plainReplacement)
+    }
   } else if (result.error) {
     alert(result.error)
   }
   aiLoading.value = false
+}
+
+function onEditorAiRewrite(payload: { text: string; instruction: string }) {
+  void aiRewrite(payload.text, payload.instruction)
 }
 
 async function platformAdapt() {
@@ -127,10 +206,6 @@ async function platformAdapt() {
   }
 }
 
-function platformLabel(id: string) {
-  return PLATFORMS.find(p => p.id === id)?.name ?? id
-}
-
 async function exportMd() {
   const r = (await window.ohsocial.invoke('export:content', contentId.value)) as {
     success: boolean
@@ -142,11 +217,15 @@ async function exportMd() {
 }
 
 onMounted(async () => {
+  const list = await loadPlatforms()
+  if (list.length && !adaptPlatform.value) adaptPlatform.value = list[0].id
   hasModel.value = (await window.ohsocial.invoke('model:hasEnabled')) as boolean
   deltaHandler = (payload: unknown) => {
-    const p = payload as { contentId?: number; delta?: string }
-    if (p.contentId === contentId.value && p.delta) {
-      aiStream.value += p.delta
+    const p = payload as { contentId?: number; delta?: string; kind?: string }
+    if (p.contentId !== contentId.value || !p.delta || p.kind === 'thinking') return
+    aiStream.value += p.delta
+    if (streamingToEditor) {
+      body.value = toEditorHtml(aiStream.value)
     }
   }
   window.ohsocial.on('ai:delta', deltaHandler)
@@ -167,20 +246,26 @@ onUnmounted(() => {
       <select v-model="status" class="select select-bordered select-sm w-32">
         <option v-for="(label, key) in CONTENT_STATUS_LABELS" :key="key" :value="key">{{ label }}</option>
       </select>
+      <select v-model="writingStyleId" class="select select-bordered select-sm max-w-[9rem]" title="绑定文风">
+        <option value="">不绑定文风</option>
+        <option v-for="s in writingStyles" :key="s.id" :value="s.id">
+          {{ s.name }}{{ s.isDefault ? '（默认）' : '' }}
+        </option>
+      </select>
       <button class="btn btn-ghost btn-sm" @click="router.push(`/contents/${contentId}/script`)">视频脚本</button>
       <button class="btn btn-ghost btn-sm" @click="router.push(`/contents/${contentId}/versions`)">版本历史</button>
       <button class="btn btn-ghost btn-sm" @click="exportMd">导出 MD</button>
       <button v-if="isOrigin" class="btn btn-outline btn-sm" :disabled="aiLoading || !hasModel" @click="showAdapt = !showAdapt">多平台改写</button>
       <button class="btn btn-outline btn-sm" @click="goSchedule">去排期</button>
       <button class="btn btn-primary btn-sm" :disabled="aiLoading || !hasModel" @click="aiGenerate">AI 生成</button>
-      <button class="btn btn-outline btn-sm" :disabled="aiLoading || !hasModel" @click="aiRewrite">AI 改写</button>
+      <button class="btn btn-outline btn-sm" :disabled="aiLoading || !hasModel" @click="aiRewrite()">AI 改写</button>
       <span v-if="saving" class="text-xs text-base-content/50">保存中…</span>
     </header>
 
     <div v-if="showAdapt && isOrigin" class="px-6 py-3 bg-base-200 border-b border-base-300 flex flex-wrap gap-2 items-center">
       <span class="text-sm">改写为</span>
       <select v-model="adaptPlatform" class="select select-bordered select-sm">
-        <option v-for="p in PLATFORMS" :key="p.id" :value="p.id">{{ p.name }}</option>
+        <option v-for="p in platforms" :key="p.id" :value="p.id">{{ p.name }}</option>
       </select>
       <button class="btn btn-primary btn-sm" :disabled="aiLoading || !hasModel" @click="platformAdapt">开始改写</button>
     </div>
@@ -197,8 +282,19 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div class="flex-1 overflow-y-auto p-6">
-      <RichTextEditor v-model="body" />
+    <div class="flex-1 overflow-y-auto p-6 min-h-0 flex flex-col">
+      <p v-if="boundStyleName" class="text-xs text-primary mb-2 shrink-0">
+        当前文风：{{ boundStyleName }} · AI 生成将按此文风代笔
+      </p>
+      <RichTextEditor
+        v-model="body"
+        class="flex-1 min-h-[480px]"
+        :ai-enabled="hasModel && !aiLoading"
+        :diff-lines="diffWithLastVersion"
+        :comments="editorComments"
+        @update:comments="editorComments = $event"
+        @ai-rewrite="onEditorAiRewrite"
+      />
       <p v-if="!hasModel" class="text-xs text-warning mt-2">请先在设置 → AI 服务中配置 API Key</p>
     </div>
   </div>

@@ -4,7 +4,7 @@ import { openAICompatibleAuthHeaders } from '../../shared/mimo-api-params'
 import { assistantDAO } from '../db/dao/assistant-dao'
 import { executeTool, TOOL_SCHEMAS } from '../tools/executor'
 import { getSkill, BUILTIN_SKILLS } from '../../shared/skills'
-import { personaDAO } from '../db/dao/persona-dao'
+import { platformAccountDAO } from '../db/dao/platform-account-dao'
 import { customSkillDAO } from '../db/dao/custom-skill-dao'
 import type { AiProgressEmitter } from './ai-progress'
 import { llmLogger } from '../services/file-logger'
@@ -59,17 +59,15 @@ export class AssistantService {
     }
 
     const skill = resolveSkill(skillId)
-    let personaCtx = ''
-    try {
-      const p = personaDAO.get()
-      personaCtx = `领域：${p.domains.join('、')}\n受众：${p.audience}\n风格：${p.style}`
-    } catch {
-      // ignore
-    }
+    const platformCtx = platformAccountDAO
+      .list()
+      .filter(a => a.contentDomain || a.displayName)
+      .map(a => `${a.displayName || a.platform}：${a.contentDomain || '未配置领域'}`)
+      .join('\n')
 
     const systemParts = [
       '你是 OhSocial 自媒体运营 AI 助手，帮助用户选题、调研和规划内容。',
-      personaCtx ? `创作者定位：\n${personaCtx}` : '',
+      platformCtx ? `各平台内容定位：\n${platformCtx}` : '',
       skill?.systemPrompt ?? '可使用工具查询本地选题、内容，并帮助创建选题。'
     ].filter(Boolean)
 

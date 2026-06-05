@@ -10,6 +10,7 @@ import {
   faChevronDown,
   faChevronUp,
   faCheckCircle,
+  faClock,
   faCog,
   faDatabase,
   faDesktop,
@@ -52,6 +53,7 @@ library.add(
   faChevronDown,
   faChevronUp,
   faCheckCircle,
+  faClock,
   faCog,
   faDatabase,
   faDesktop,
@@ -86,12 +88,14 @@ library.add(
   faWifi
 )
 
+import { initAiProgressBridge } from './composables/useAiProgress'
 import { initAppearanceSettings } from './services/appearanceSettings'
 import App from './App.vue'
 import router from './router'
 import './assets/main.css'
 
 initAppearanceSettings()
+initAiProgressBridge()
 
 const app = createApp(App)
 app.component('FontAwesomeIcon', FontAwesomeIcon)
