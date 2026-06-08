@@ -2,7 +2,7 @@
 export default { name: 'ContentList' }
 </script>
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import type { Content } from '../../../../shared/types/content'
 import type { Topic } from '../../../../shared/types/topic'
@@ -17,6 +17,8 @@ const loading = ref(true)
 const showCreate = ref(false)
 const selectedTopicId = ref<number | ''>('')
 const filterPlatform = ref('')
+const filterStatus = ref('')
+const viewMode = ref<'list' | 'kanban'>('list')
 const creating = ref(false)
 
 const { platforms, loadPlatforms, platformLabel } = usePlatformList()
@@ -39,11 +41,26 @@ function contentPlatformLabel(item: Content): string | null {
   return null
 }
 
+const filteredKanbanContents = computed(() => contents.value)
+
+const contentColumns = computed(() =>
+  Object.keys(CONTENT_STATUS_LABELS).map(key => ({
+    key,
+    label: CONTENT_STATUS_LABELS[key],
+    items: filteredKanbanContents.value.filter(c => c.status === key)
+  }))
+)
+
 async function load() {
   loading.value = true
-  const filter = filterPlatform.value ? { platform: filterPlatform.value } : undefined
-  contents.value = (await window.ohsocial.invoke('content:list', filter)) as Content[]
-  topics.value = (await window.ohsocial.invoke('topic:list', filter)) as Topic[]
+  const filter: { status?: string; platform?: string } = {}
+  if (viewMode.value === 'list' && filterStatus.value) filter.status = filterStatus.value
+  if (filterPlatform.value) filter.platform = filterPlatform.value
+  contents.value = (await window.ohsocial.invoke(
+    'content:list',
+    Object.keys(filter).length ? filter : undefined
+  )) as Content[]
+  topics.value = (await window.ohsocial.invoke('topic:list', filterPlatform.value ? { platform: filterPlatform.value } : undefined)) as Topic[]
   loading.value = false
 }
 
@@ -84,6 +101,11 @@ async function deleteContent(id: number) {
 
 watch(filterPlatform, () => load())
 
+watch(viewMode, () => {
+  if (viewMode.value === 'kanban') filterStatus.value = ''
+  load()
+})
+
 watch(
   () => route.query.topicId,
   async topicId => {
@@ -99,6 +121,8 @@ onMounted(async () => {
   await loadPlatforms()
   await load()
 })
+
+onActivated(load)
 </script>
 
 <template>
@@ -108,10 +132,30 @@ onMounted(async () => {
         <h2 class="text-2xl font-bold">创作</h2>
         <p class="text-base-content/60 text-sm mt-1">按平台管理图文内容</p>
       </div>
-      <button class="btn btn-primary btn-sm" @click="showCreate = !showCreate">
-        <font-awesome-icon icon="plus" />
-        新建内容
-      </button>
+      <div class="flex gap-2 flex-wrap">
+        <div class="join">
+          <button
+            type="button"
+            class="btn btn-sm join-item"
+            :class="{ 'btn-active': viewMode === 'kanban' }"
+            @click="viewMode = 'kanban'"
+          >
+            看板
+          </button>
+          <button
+            type="button"
+            class="btn btn-sm join-item"
+            :class="{ 'btn-active': viewMode === 'list' }"
+            @click="viewMode = 'list'"
+          >
+            列表
+          </button>
+        </div>
+        <button class="btn btn-primary btn-sm" @click="showCreate = !showCreate">
+          <font-awesome-icon icon="plus" />
+          新建内容
+        </button>
+      </div>
     </header>
 
     <div role="tablist" class="tabs tabs-boxed mb-4 w-fit h-auto gap-1">
@@ -134,6 +178,29 @@ onMounted(async () => {
         @click="filterPlatform = p.id"
       >
         {{ p.name }}
+      </button>
+    </div>
+
+    <div v-if="viewMode === 'list'" role="tablist" class="tabs tabs-boxed mb-4 w-fit h-auto gap-1">
+      <button
+        type="button"
+        role="tab"
+        class="tab tab-sm"
+        :class="{ 'tab-active': !filterStatus }"
+        @click="filterStatus = ''; load()"
+      >
+        全部
+      </button>
+      <button
+        v-for="(label, key) in CONTENT_STATUS_LABELS"
+        :key="key"
+        type="button"
+        role="tab"
+        class="tab tab-sm"
+        :class="{ 'tab-active': filterStatus === key }"
+        @click="filterStatus = key; load()"
+      >
+        {{ label }}
       </button>
     </div>
 
@@ -162,6 +229,46 @@ onMounted(async () => {
       <p class="text-sm">
         {{ filterPlatform ? `${platformLabel(filterPlatform)} 暂无内容，` : '' }}从选题开始写，或直接新建内容
       </p>
+    </div>
+
+    <div v-else-if="viewMode === 'kanban'" class="flex gap-3 overflow-x-auto pb-4">
+      <div
+        v-for="col in contentColumns"
+        :key="col.key"
+        class="min-w-[240px] flex-1 bg-base-200/50 rounded-box p-3"
+      >
+        <h3 class="font-semibold text-sm mb-2">{{ col.label }} ({{ col.items.length }})</h3>
+        <div class="space-y-2 min-h-[80px]">
+          <div
+            v-for="item in col.items"
+            :key="item.id"
+            class="p-3 bg-base-100 rounded-box shadow-sm text-sm cursor-pointer hover:bg-base-200/80"
+            @click="router.push(`/contents/${item.id}/edit`)"
+          >
+            <p class="font-medium truncate">{{ item.title }}</p>
+            <p class="text-xs text-base-content/50 mt-1">
+              {{ item.wordCount }} 字
+              <span v-if="contentPlatformLabel(item)"> · {{ contentPlatformLabel(item) }}</span>
+            </p>
+            <div class="flex gap-1 mt-2">
+              <button
+                type="button"
+                class="btn btn-xs btn-ghost"
+                @click.stop="router.push(`/contents/${item.id}/script`)"
+              >
+                脚本
+              </button>
+              <button
+                type="button"
+                class="btn btn-xs btn-ghost text-error ml-auto"
+                @click.stop="deleteContent(item.id)"
+              >
+                删
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <ul v-else class="space-y-2">

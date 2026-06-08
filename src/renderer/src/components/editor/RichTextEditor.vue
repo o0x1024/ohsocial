@@ -24,11 +24,13 @@ const props = withDefaults(
     aiEnabled?: boolean
     diffLines?: DiffLine[]
     comments?: EditorComment[]
+    layoutClass?: string
   }>(),
   {
     aiEnabled: false,
     diffLines: () => [],
-    comments: () => []
+    comments: () => [],
+    layoutClass: ''
   }
 )
 
@@ -219,7 +221,10 @@ onBeforeUnmount(() => editor.value?.destroy())
 </script>
 
 <template>
-  <div class="editor-shell border border-base-300 rounded-box bg-base-100 overflow-hidden flex flex-col">
+  <div
+    class="editor-shell border border-base-300 rounded-box bg-base-100 overflow-hidden flex flex-col"
+    :class="layoutClass"
+  >
     <EditorToolbar v-if="editor" :editor="editor">
       <button type="button" class="btn btn-xs" title="插入图片" @click="insertImageFromToolbar">🖼</button>
     </EditorToolbar>

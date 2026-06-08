@@ -1,4 +1,5 @@
 import type { Editor } from '@tiptap/core'
+import { prepareHtmlForExport } from '../../../../shared/content-layout-export'
 import { DOMSerializer } from '@tiptap/pm/model'
 
 function fragmentToHtml(editor: Editor, fragment: Parameters<DOMSerializer['serializeFragment']>[0]): string {
@@ -37,12 +38,13 @@ export async function copyEditorContent(editor: Editor): Promise<boolean> {
   if (!payload) return false
 
   const { html, text } = payload
+  const exportHtml = prepareHtmlForExport(html)
 
   try {
     if (typeof ClipboardItem !== 'undefined') {
       await navigator.clipboard.write([
         new ClipboardItem({
-          'text/html': new Blob([wrapClipboardHtml(html)], { type: 'text/html' }),
+          'text/html': new Blob([wrapClipboardHtml(exportHtml)], { type: 'text/html' }),
           'text/plain': new Blob([text], { type: 'text/plain' })
         })
       ])

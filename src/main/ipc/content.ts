@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import type { ContentCreateInput, ContentUpdateInput } from '../../shared/types/content'
 import { resolveContentPlatformIds } from '../../shared/content-platform'
+import { DEFAULT_LAYOUT_TEMPLATE_ID } from '../../shared/content-layout-templates'
 import { contentDAO, platformAccountDAO, topicDAO, writingStyleDAO } from '../db'
 import { modelService } from '../ai/model-service'
 import { runWithAiProgress } from './ai-progress-runner'
@@ -77,6 +78,7 @@ export function registerContentHandlers(): void {
         topic.targetPlatforms.length === 1 ? topic.targetPlatforms[0] : undefined
     }
     if (defaultStyle) meta.writingStyleId = defaultStyle.id
+    meta.layoutTemplateId = DEFAULT_LAYOUT_TEMPLATE_ID
 
     let content = contentDAO.create({
       title: topic.title,
@@ -88,9 +90,16 @@ export function registerContentHandlers(): void {
     return { success: true, content, created: true }
   })
 
-  ipcMain.handle('content:update', (_e, id: number, input: ContentUpdateInput, operation?: string) =>
-    contentDAO.update(id, input, operation ?? 'manual_edit')
-  )
+  ipcMain.handle('content:update', (_e, id: number, input: ContentUpdateInput, operation?: string) => {
+    const updated = contentDAO.update(id, input, operation ?? 'manual_edit')
+    if (updated?.topicId && input.status === 'published') {
+      const topic = topicDAO.getById(updated.topicId)
+      if (topic && topic.status !== 'done') {
+        topicDAO.update(updated.topicId, { status: 'done' })
+      }
+    }
+    return updated
+  })
 
   ipcMain.handle('content:delete', (_e, id: number) => contentDAO.delete(id))
 
@@ -158,13 +167,16 @@ export function registerContentHandlers(): void {
         }
         const writingStyleId =
           typeof content.meta?.writingStyleId === 'number' ? content.meta.writingStyleId : null
+        const layoutTemplateId =
+          typeof content.meta?.layoutTemplateId === 'string' ? content.meta.layoutTemplateId : null
         const platformIds = platformIdsForContent(content)
         const result = await modelService.generateWriting(
           content.title,
           brief,
           streamCallbacks(progress, { contentId, mode: 'generate' }),
           writingStyleId,
-          platformIds
+          platformIds,
+          layoutTemplateId
         )
         return {
           success: result.success,

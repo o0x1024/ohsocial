@@ -17,6 +17,7 @@ import { writingStyleDAO } from '../db/dao/writing-style-dao'
 import { hotspotDAO } from '../db/dao/hotspot-dao'
 import type { WritingStyleDimensions } from '../../shared/types/writing-style'
 import type { StyleStepRules } from '../../shared/style-step-rules'
+import { getLayoutTemplate } from '../../shared/content-layout-templates'
 
 export interface StreamCallbacks {
   onDelta?: (delta: string) => void
@@ -342,22 +343,16 @@ export class ModelService {
     brief: string,
     callbacks?: StreamCallbacks,
     writingStyleId?: number | null,
-    platformIds: string[] = []
+    platformIds: string[] = [],
+    layoutTemplateId?: string | null
   ): Promise<ModelChatResponse> {
     const styleCtx = this.buildWritingStyleContext(writingStyleId)
     const platformCtx = this.buildPlatformsContext(platformIds)
+    const layoutTemplate = getLayoutTemplate(layoutTemplateId)
     const personaHint = this.hasConfiguredPersona(platformIds)
       ? '\n写作时必须代入上述创作人设的视角、专业背景与表达口吻。'
       : ''
-    const formatRules = `
-排版规则（必须严格遵守）：
-1. 使用丰富的 HTML 标签构建层次：<h2> 小节标题、<p> 正文段落、<strong> 关键词/重点句、<blockquote> 金句或引言、<ul>/<ol> 要点列举
-2. 每 3-5 个段落设置一个 <h2> 小节标题，让文章有清晰的结构感
-3. 段落精炼：每段 2-4 句话，避免大段堆砌
-4. 适当使用 <strong> 标注核心观点和关键信息（每段最多 1-2 处）
-5. 列举要点时用 <ul><li> 或 <ol><li>，不要用纯文字罗列
-6. 精彩金句或引言使用 <blockquote> 包裹
-7. 直接输出 HTML 正文，不要输出文章大标题、不要解释、不要 markdown 代码块`
+    const formatRules = `\n排版模板【${layoutTemplate.name}】（必须严格遵守）：\n${layoutTemplate.aiFormatRules}`
     return this.chat({
       step: 'content_generate',
       systemPrompt: `你是自媒体写作助手。${platformCtx ? `\n${platformCtx}` : ''}${personaHint}${styleCtx ? `\n\n${styleCtx}` : ''}\n请严格遵循上述文风要求，根据标题与要点独立完成一篇完整文章，由你全权代笔。\n${formatRules}`,

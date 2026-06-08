@@ -252,7 +252,7 @@ function setLink(editor: Editor) {
       type="button"
       class="btn btn-xs"
       :class="{ 'btn-success': copyDone }"
-      :title="copyDone ? '已复制' : '一键复制'"
+      :title="copyDone ? '已复制（含排版样式，可粘贴到公众号）' : '复制正文（含排版样式，可粘贴到公众号）'"
       @click="copyContent(editor)"
     >
       {{ copyDone ? '已复制' : '复制' }}

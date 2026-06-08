@@ -2,7 +2,7 @@
 export default { name: 'ContentEditor' }
 </script>
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import RichTextEditor from '../../components/editor/RichTextEditor.vue'
 import { useAiProgress } from '../../composables/useAiProgress'
@@ -11,6 +11,12 @@ import type { Content } from '../../../../shared/types/content'
 import type { WritingStyle } from '../../../../shared/types/writing-style'
 import type { EditorComment } from '../../../../shared/types/editor'
 import { CONTENT_STATUS_LABELS } from '../../../../shared/constants/platforms'
+import {
+  DEFAULT_LAYOUT_TEMPLATE_ID,
+  getLayoutTemplate,
+  listLayoutTemplates,
+  type ContentLayoutTemplate
+} from '../../../../shared/content-layout-templates'
 import { resolveContentPlatformIds } from '../../../../shared/content-platform'
 import type { PlatformAccount } from '../../../../shared/types/platform-account'
 import type { Topic } from '../../../../shared/types/topic'
@@ -35,6 +41,8 @@ const adaptPlatform = ref('')
 const { platforms, loadPlatforms, platformLabel } = usePlatformList()
 const writingStyles = ref<WritingStyle[]>([])
 const writingStyleId = ref<number | ''>('')
+const layoutTemplates = ref<ContentLayoutTemplate[]>(listLayoutTemplates())
+const layoutTemplateId = ref<string>(DEFAULT_LAYOUT_TEMPLATE_ID)
 const editorComments = ref<EditorComment[]>([])
 const lastVersionBody = ref('')
 const platformAccounts = ref<PlatformAccount[]>([])
@@ -43,6 +51,8 @@ const linkedTopic = ref<Topic | null>(null)
 const { contentText: aiContentText, thinkingText: aiThinkingText } = useAiProgress()
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+let saveSeq = 0
+let contentLoaded = false
 let deltaHandler: ((...args: unknown[]) => void) | null = null
 let streamingToEditor = false
 
@@ -61,6 +71,7 @@ async function loadVersionBaseline() {
 }
 
 async function load() {
+  contentLoaded = false
   content.value = (await window.ohsocial.invoke('content:get', contentId.value)) as Content | undefined ?? null
   if (!content.value) {
     router.replace('/contents')
@@ -72,6 +83,11 @@ async function load() {
   writingStyles.value = (await window.ohsocial.invoke('writing-style:list')) as WritingStyle[]
   const boundId = content.value.meta?.writingStyleId
   writingStyleId.value = typeof boundId === 'number' ? boundId : ''
+  const boundLayoutId = content.value.meta?.layoutTemplateId
+  layoutTemplateId.value =
+    typeof boundLayoutId === 'string' && boundLayoutId
+      ? boundLayoutId
+      : DEFAULT_LAYOUT_TEMPLATE_ID
   const rawComments = content.value.meta?.comments
   editorComments.value = Array.isArray(rawComments) ? (rawComments as EditorComment[]) : []
   linkedTopic.value = content.value.topicId
@@ -80,44 +96,71 @@ async function load() {
   const originId = content.value.parentId ?? content.value.id
   versions.value = (await window.ohsocial.invoke('content:list-versions', originId)) as Content[]
   await loadVersionBaseline()
+  contentLoaded = true
 }
 
 async function save() {
   if (!content.value) return
+  const seq = ++saveSeq
   saving.value = true
-  const meta = JSON.parse(JSON.stringify(content.value.meta ?? {})) as Record<string, unknown>
-  if (writingStyleId.value) {
-    meta.writingStyleId = Number(writingStyleId.value)
-  } else {
-    delete meta.writingStyleId
+  try {
+    const meta = JSON.parse(JSON.stringify(content.value.meta ?? {})) as Record<string, unknown>
+    if (writingStyleId.value) {
+      meta.writingStyleId = Number(writingStyleId.value)
+    } else {
+      delete meta.writingStyleId
+    }
+    if (layoutTemplateId.value) {
+      meta.layoutTemplateId = layoutTemplateId.value
+    } else {
+      delete meta.layoutTemplateId
+    }
+    if (editorComments.value.length) {
+      meta.comments = JSON.parse(JSON.stringify(editorComments.value))
+    } else {
+      delete meta.comments
+    }
+    const updated = (await window.ohsocial.invoke('content:update', contentId.value, {
+      title: title.value,
+      body: body.value,
+      status: status.value,
+      meta
+    })) as Content
+    if (seq !== saveSeq) return
+    content.value = updated
+    await loadVersionBaseline()
+  } finally {
+    if (seq === saveSeq) saving.value = false
   }
-  if (editorComments.value.length) {
-    meta.comments = JSON.parse(JSON.stringify(editorComments.value))
-  } else {
-    delete meta.comments
-  }
-  content.value = (await window.ohsocial.invoke('content:update', contentId.value, {
-    title: title.value,
-    body: body.value,
-    status: status.value,
-    meta
-  })) as Content
-  saving.value = false
-  await loadVersionBaseline()
 }
 
 function scheduleSave() {
   if (saveTimer) clearTimeout(saveTimer)
-  saveTimer = setTimeout(save, 800)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    void save()
+  }, 800)
 }
 
-watch([title, body, status, writingStyleId], scheduleSave)
+function saveStatusImmediately() {
+  if (!contentLoaded) return
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  void save()
+}
+
+watch([title, body, writingStyleId, layoutTemplateId], scheduleSave)
+watch(status, saveStatusImmediately)
 watch(editorComments, scheduleSave, { deep: true })
 
 const boundStyleName = computed(() => {
   if (!writingStyleId.value) return ''
   return writingStyles.value.find(s => s.id === writingStyleId.value)?.name ?? ''
 })
+
+const boundLayoutTemplate = computed(() => getLayoutTemplate(layoutTemplateId.value))
 
 const boundPersonaHint = computed(() => {
   if (!content.value) return ''
@@ -282,9 +325,16 @@ onMounted(async () => {
   await load()
 })
 
+onBeforeUnmount(async () => {
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = null
+  }
+  await save()
+})
+
 onUnmounted(() => {
   if (deltaHandler) window.ohsocial.off('ai:delta', deltaHandler)
-  if (saveTimer) clearTimeout(saveTimer)
 })
 </script>
 
@@ -300,6 +350,15 @@ onUnmounted(() => {
         <option value="">不绑定文风</option>
         <option v-for="s in writingStyles" :key="s.id" :value="s.id">
           {{ s.name }}{{ s.isDefault ? '（默认）' : '' }}
+        </option>
+      </select>
+      <select
+        v-model="layoutTemplateId"
+        class="select select-bordered select-sm max-w-[8rem]"
+        title="排版模板"
+      >
+        <option v-for="t in layoutTemplates" :key="t.id" :value="t.id">
+          {{ t.name }}
         </option>
       </select>
       <button class="btn btn-ghost btn-sm" @click="router.push(`/contents/${contentId}/script`)">视频脚本</button>
@@ -336,6 +395,9 @@ onUnmounted(() => {
       <p v-if="boundStyleName" class="text-xs text-primary mb-2 shrink-0">
         当前文风：{{ boundStyleName }} · AI 生成将按此文风代笔
       </p>
+      <p class="text-xs text-accent mb-2 shrink-0">
+        排版模板：{{ boundLayoutTemplate.name }} · {{ boundLayoutTemplate.description }} · 复制正文时样式可粘贴到公众号等平台
+      </p>
       <p v-if="boundPersonaHint" class="text-xs text-secondary mb-2 shrink-0">
         创作人设：{{ boundPersonaHint }} · AI 生成将代入此人设
       </p>
@@ -345,6 +407,7 @@ onUnmounted(() => {
       <RichTextEditor
         v-model="body"
         class="flex-1 min-h-[480px]"
+        :layout-class="boundLayoutTemplate.cssClass"
         :ai-enabled="hasModel && !aiLoading"
         :diff-lines="diffWithLastVersion"
         :comments="editorComments"

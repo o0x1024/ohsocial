@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref } from 'vue'
 import type { WritingStyle, WritingStyleCreateInput } from '../../../../shared/types/writing-style'
 
 const styles = ref<WritingStyle[]>([])
@@ -99,6 +99,7 @@ async function setDefault(style: WritingStyle) {
 }
 
 onMounted(load)
+onActivated(load)
 </script>
 
 <template>

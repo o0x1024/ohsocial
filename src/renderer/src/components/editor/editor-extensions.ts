@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/core'
 import StarterKit from '@tiptap/starter-kit'
 import Typography from '@tiptap/extension-typography'
-import Highlight from '@tiptap/extension-highlight'
+import { LayoutBold, LayoutHighlight, PreserveLayoutClasses } from './layout-class-extension'
 import TextAlign from '@tiptap/extension-text-align'
 import Link from '@tiptap/extension-link'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -40,10 +40,13 @@ export function createEditorExtensions(options: CreateEditorExtensionsOptions = 
   return [
     StarterKit.configure({
       codeBlock: false,
-      dropcursor: { color: 'oklch(var(--p))', width: 2 }
+      dropcursor: { color: 'oklch(var(--p))', width: 2 },
+      bold: false
     }),
+    LayoutBold,
     Typography,
-    Highlight.configure({ multicolor: false }),
+    PreserveLayoutClasses,
+    LayoutHighlight.configure({ multicolor: false }),
     TextAlign.configure({ types: ['heading', 'paragraph'] }),
     Link.configure({
       openOnClick: false,

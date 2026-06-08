@@ -182,6 +182,79 @@
     box-decoration-break: clone;
   }
 
+  /* 排版模板 — 语义块样式（编辑器预览 + 复制时转 inline style） */
+  .tiptap-editor .ProseMirror .oh-h2 {
+    @apply text-xl font-bold mt-8 mb-3;
+    line-height: 1.4;
+    padding-bottom: 0.35em;
+    border-bottom: 2px solid oklch(var(--p) / 0.55);
+    color: oklch(var(--bc) / 0.95);
+  }
+  .tiptap-editor .ProseMirror .oh-h3 {
+    @apply text-lg font-semibold mt-6 mb-2;
+    line-height: 1.5;
+    color: oklch(var(--bc) / 0.9);
+  }
+  .tiptap-editor .ProseMirror .oh-quote {
+    @apply border-l-4 border-primary pl-5 pr-4 py-3 my-5 rounded-r-lg;
+    background-color: oklch(var(--p) / 0.06);
+    color: oklch(var(--bc) / 0.82);
+    font-style: normal;
+    line-height: 1.75;
+  }
+  .tiptap-editor .ProseMirror .oh-tip {
+    @apply border-l-4 pl-5 pr-4 py-3 my-4 rounded-r-lg;
+    border-color: oklch(var(--in));
+    background-color: oklch(var(--in) / 0.08);
+    color: oklch(var(--bc) / 0.85);
+    line-height: 1.7;
+  }
+  .tiptap-editor .ProseMirror .oh-intro {
+    @apply text-base my-2 mb-5;
+    color: oklch(var(--bc) / 0.62);
+    font-style: italic;
+    line-height: 1.85;
+  }
+  .tiptap-editor .ProseMirror strong.oh-key,
+  .tiptap-editor .ProseMirror .oh-key {
+    @apply font-bold;
+    color: oklch(var(--er) / 0.85);
+  }
+  .tiptap-editor .ProseMirror mark.oh-highlight,
+  .tiptap-editor .ProseMirror .oh-highlight {
+    @apply rounded px-1;
+    background-color: oklch(var(--wa) / 0.35);
+    color: oklch(var(--bc) / 0.9);
+    box-decoration-break: clone;
+  }
+  .tiptap-editor .ProseMirror hr.oh-divider {
+    @apply my-8 border-0 border-t border-dashed;
+    border-color: oklch(var(--bc) / 0.18);
+  }
+
+  /* 模板皮肤微调 */
+  .layout-xiaohongshu-bright .tiptap-editor .ProseMirror {
+    max-width: 640px;
+    line-height: 1.75;
+  }
+  .layout-xiaohongshu-bright .tiptap-editor .ProseMirror p {
+    @apply my-2;
+    text-align: left;
+  }
+  .layout-knowledge-card .tiptap-editor .ProseMirror table {
+    @apply rounded-lg overflow-hidden;
+    box-shadow: 0 1px 3px oklch(var(--bc) / 0.08);
+  }
+  .layout-minimal .tiptap-editor .ProseMirror .oh-quote {
+    background-color: transparent;
+    @apply border-l-2 pl-4;
+    border-color: oklch(var(--bc) / 0.25);
+  }
+  .layout-minimal .tiptap-editor .ProseMirror .oh-h2 {
+    border-bottom-width: 1px;
+    border-color: oklch(var(--bc) / 0.12);
+  }
+
   /* 行数限制 */
   .line-clamp-2 {
     display: -webkit-box;
