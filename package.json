@@ -1,6 +1,6 @@
 {
   "name": "ohsocial",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "description": "自媒体运营工具 — AI 驱动的选题、创作、排期",
   "main": "./out/main/index.js",

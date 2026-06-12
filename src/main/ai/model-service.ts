@@ -344,7 +344,8 @@ export class ModelService {
     callbacks?: StreamCallbacks,
     writingStyleId?: number | null,
     platformIds: string[] = [],
-    layoutTemplateId?: string | null
+    layoutTemplateId?: string | null,
+    targetWordCount?: number | null
   ): Promise<ModelChatResponse> {
     const styleCtx = this.buildWritingStyleContext(writingStyleId)
     const platformCtx = this.buildPlatformsContext(platformIds)
@@ -353,10 +354,15 @@ export class ModelService {
       ? '\n写作时必须代入上述创作人设的视角、专业背景与表达口吻。'
       : ''
     const formatRules = `\n排版模板【${layoutTemplate.name}】（必须严格遵守）：\n${layoutTemplate.aiFormatRules}`
+    const wordCount =
+      typeof targetWordCount === 'number' && targetWordCount > 0 ? Math.round(targetWordCount) : null
+    const wordCountHint = wordCount
+      ? `\n\n目标字数：正文约 ${wordCount} 字（按纯文本计，不含 HTML 标签），篇幅应接近该目标，允许 ±10% 浮动。`
+      : ''
     return this.chat({
       step: 'content_generate',
       systemPrompt: `你是自媒体写作助手。${platformCtx ? `\n${platformCtx}` : ''}${personaHint}${styleCtx ? `\n\n${styleCtx}` : ''}\n请严格遵循上述文风要求，根据标题与要点独立完成一篇完整文章，由你全权代笔。\n${formatRules}`,
-      prompt: `文章标题：${title}${brief ? `\n\n选题要点：\n${brief}` : ''}\n\n请撰写完整正文。`,
+      prompt: `文章标题：${title}${brief ? `\n\n选题要点：\n${brief}` : ''}${wordCountHint}\n\n请撰写完整正文。`,
       temperature: 0.85,
       maxTokens: 8192
     }, callbacks)

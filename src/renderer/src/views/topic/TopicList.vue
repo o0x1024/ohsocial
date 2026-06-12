@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { TOPIC_STATUS_LABELS } from '../../../../shared/constants/platforms'
 import type { Topic, TopicCreateInput } from '../../../../shared/types/topic'
@@ -104,6 +104,10 @@ async function aiRecommend() {
 
 async function startWriting(topic: Topic) {
   writingTopicId.value = topic.id
+  const idx = topics.value.findIndex(t => t.id === topic.id)
+  if (idx >= 0 && topics.value[idx].status !== 'writing') {
+    topics.value[idx] = { ...topics.value[idx], status: 'writing' }
+  }
   const r = (await window.ohsocial.invoke('content:create-from-topic', topic.id)) as {
     success: boolean
     content?: { id: number }
@@ -111,9 +115,11 @@ async function startWriting(topic: Topic) {
   }
   writingTopicId.value = null
   if (r.success && r.content) {
+    await loadTopics()
     router.push(`/contents/${r.content.id}/edit`)
   } else if (r.error) {
     alert(r.error)
+    await loadTopics()
   }
 }
 
@@ -141,6 +147,8 @@ onMounted(async () => {
   await loadPlatforms()
   await loadTopics()
 })
+
+onActivated(loadTopics)
 </script>
 
 <template>

@@ -7,14 +7,14 @@ const route = useRoute()
 const router = useRouter()
 
 const navItems = [
-  { path: '/', icon: 'house', label: '今日' },
-  { path: '/topics', icon: 'lightbulb', label: '选题' },
-  { path: '/contents', icon: 'pen-to-square', label: '创作' },
-  { path: '/schedule', icon: 'calendar-days', label: '排期' },
-  { path: '/materials', icon: 'folder', label: '素材' },
-  { path: '/writing-styles', icon: 'font', label: '文风' },
-  { path: '/assistant', icon: 'robot', label: 'AI 助手' },
-  { path: '/settings', icon: 'cog', label: '设置' }
+  { path: '/', icon: 'house', label: '今日概览' },
+  { path: '/topics', icon: 'lightbulb', label: '选题管理' },
+  { path: '/contents', icon: 'pen-to-square', label: '内容创作' },
+  { path: '/schedule', icon: 'calendar-days', label: '发布排期' },
+  { path: '/materials', icon: 'folder', label: '素材中心' },
+  { path: '/writing-styles', icon: 'font', label: '文风管理' },
+  { path: '/assistant', icon: 'robot', label: '智能助手' },
+  { path: '/settings', icon: 'cog', label: '系统设置' }
 ]
 
 const activePath = computed(() => {

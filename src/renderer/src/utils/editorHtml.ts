@@ -173,3 +173,13 @@ function polishHtml(html: string): string {
 
   return result
 }
+
+/** 移除 HTML 正文中的破折号（——、—） */
+export function removeEmDashesFromHtml(html: string): { html: string; count: number } {
+  const doubleCount = (html.match(/——/g) ?? []).length
+  const withoutDouble = html.replace(/——/g, '')
+  const singleCount = (withoutDouble.match(/—/g) ?? []).length
+  const count = doubleCount + singleCount
+  if (count === 0) return { html, count: 0 }
+  return { html: withoutDouble.replace(/—/g, ''), count }
+}

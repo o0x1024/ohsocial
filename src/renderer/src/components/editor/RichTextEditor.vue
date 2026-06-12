@@ -226,6 +226,7 @@ onBeforeUnmount(() => editor.value?.destroy())
     :class="layoutClass"
   >
     <EditorToolbar v-if="editor" :editor="editor">
+      <slot name="toolbar-extra" />
       <button type="button" class="btn btn-xs" title="插入图片" @click="insertImageFromToolbar">🖼</button>
     </EditorToolbar>
 

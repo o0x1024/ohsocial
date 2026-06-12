@@ -2,13 +2,13 @@
 export default { name: 'ContentEditor' }
 </script>
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import RichTextEditor from '../../components/editor/RichTextEditor.vue'
 import { useAiProgress } from '../../composables/useAiProgress'
-import { toEditorHtml } from '../../utils/editorHtml'
+import { removeEmDashesFromHtml, toEditorHtml } from '../../utils/editorHtml'
 import type { Content } from '../../../../shared/types/content'
-import type { WritingStyle } from '../../../../shared/types/writing-style'
+import { useWritingStyles } from '../../composables/useWritingStyles'
 import type { EditorComment } from '../../../../shared/types/editor'
 import { CONTENT_STATUS_LABELS } from '../../../../shared/constants/platforms'
 import {
@@ -39,10 +39,11 @@ const hasModel = ref(false)
 const showAdapt = ref(false)
 const adaptPlatform = ref('')
 const { platforms, loadPlatforms, platformLabel } = usePlatformList()
-const writingStyles = ref<WritingStyle[]>([])
+const { styles: writingStyles, loadWritingStyles } = useWritingStyles()
 const writingStyleId = ref<number | ''>('')
 const layoutTemplates = ref<ContentLayoutTemplate[]>(listLayoutTemplates())
 const layoutTemplateId = ref<string>(DEFAULT_LAYOUT_TEMPLATE_ID)
+const targetWordCount = ref<number | ''>('')
 const editorComments = ref<EditorComment[]>([])
 const lastVersionBody = ref('')
 const platformAccounts = ref<PlatformAccount[]>([])
@@ -80,7 +81,7 @@ async function load() {
   title.value = content.value.title
   body.value = content.value.body
   status.value = content.value.status
-  writingStyles.value = (await window.ohsocial.invoke('writing-style:list')) as WritingStyle[]
+  await loadWritingStyles(true)
   const boundId = content.value.meta?.writingStyleId
   writingStyleId.value = typeof boundId === 'number' ? boundId : ''
   const boundLayoutId = content.value.meta?.layoutTemplateId
@@ -88,6 +89,9 @@ async function load() {
     typeof boundLayoutId === 'string' && boundLayoutId
       ? boundLayoutId
       : DEFAULT_LAYOUT_TEMPLATE_ID
+  const boundWordCount = content.value.meta?.targetWordCount
+  targetWordCount.value =
+    typeof boundWordCount === 'number' && boundWordCount > 0 ? boundWordCount : ''
   const rawComments = content.value.meta?.comments
   editorComments.value = Array.isArray(rawComments) ? (rawComments as EditorComment[]) : []
   linkedTopic.value = content.value.topicId
@@ -114,6 +118,12 @@ async function save() {
       meta.layoutTemplateId = layoutTemplateId.value
     } else {
       delete meta.layoutTemplateId
+    }
+    const wordCount = Number(targetWordCount.value)
+    if (Number.isFinite(wordCount) && wordCount > 0) {
+      meta.targetWordCount = Math.round(wordCount)
+    } else {
+      delete meta.targetWordCount
     }
     if (editorComments.value.length) {
       meta.comments = JSON.parse(JSON.stringify(editorComments.value))
@@ -151,7 +161,7 @@ function saveStatusImmediately() {
   void save()
 }
 
-watch([title, body, writingStyleId, layoutTemplateId], scheduleSave)
+watch([title, body, writingStyleId, layoutTemplateId, targetWordCount], scheduleSave)
 watch(status, saveStatusImmediately)
 watch(editorComments, scheduleSave, { deep: true })
 
@@ -176,6 +186,23 @@ const boundPersonaHint = computed(() => {
   return `${platformLabel(platformId)} · ${persona}`
 })
 
+const boundPersonaShort = computed(() => {
+  const hint = boundPersonaHint.value
+  if (!hint) return ''
+  const persona = hint.includes(' · ') ? hint.split(' · ').slice(1).join(' · ') : hint
+  return persona.length > 14 ? `${persona.slice(0, 14)}…` : persona
+})
+
+const editorContextTitle = computed(() => {
+  const parts: string[] = []
+  if (boundStyleName.value) parts.push(`文风：${boundStyleName.value}（AI 生成将按此文风代笔）`)
+  parts.push(`排版：${boundLayoutTemplate.value.name} · ${boundLayoutTemplate.value.description}`)
+  if (boundPersonaHint.value) parts.push(`人设：${boundPersonaHint.value}（AI 生成将代入此人设）`)
+  else if (showMissingPersonaHint.value) parts.push('人设：未配置，可在设置 → 运营配置中为对应平台填写')
+  if (targetWordCount.value) parts.push(`目标字数：约 ${targetWordCount.value} 字`)
+  return parts.join('\n')
+})
+
 const showMissingPersonaHint = computed(() => {
   if (!content.value || boundPersonaHint.value) return false
   return resolveContentPlatformIds({
@@ -184,6 +211,15 @@ const showMissingPersonaHint = computed(() => {
     topicTargetPlatforms: linkedTopic.value?.targetPlatforms
   }).length > 0
 })
+
+function removeEmDashes() {
+  const { html, count } = removeEmDashesFromHtml(body.value)
+  if (count === 0) {
+    alert('正文中未发现破折号')
+    return
+  }
+  body.value = html
+}
 
 function applyGeneratedBody(raw: string) {
   const html = toEditorHtml(raw)
@@ -301,6 +337,10 @@ async function exportMd() {
   else if (r.error && r.error !== '已取消') alert(r.error)
 }
 
+onActivated(() => {
+  void loadWritingStyles(true)
+})
+
 onMounted(async () => {
   const list = await loadPlatforms()
   if (list.length && !adaptPlatform.value) adaptPlatform.value = list[0].id
@@ -361,6 +401,17 @@ onUnmounted(() => {
           {{ t.name }}
         </option>
       </select>
+      <label class="flex items-center gap-1 shrink-0" title="AI 生成时的目标正文字数，留空则不限制">
+        <span class="text-xs text-base-content/50">字数</span>
+        <input
+          v-model.number="targetWordCount"
+          type="number"
+          min="0"
+          step="100"
+          class="input input-bordered input-sm w-[5.5rem]"
+          placeholder="不限"
+        />
+      </label>
       <button class="btn btn-ghost btn-sm" @click="router.push(`/contents/${contentId}/script`)">视频脚本</button>
       <button class="btn btn-ghost btn-sm" @click="router.push(`/contents/${contentId}/versions`)">版本历史</button>
       <button class="btn btn-ghost btn-sm" @click="exportMd">导出 MD</button>
@@ -392,18 +443,35 @@ onUnmounted(() => {
     </div>
 
     <div class="flex-1 overflow-y-auto p-6 min-h-0 flex flex-col">
-      <p v-if="boundStyleName" class="text-xs text-primary mb-2 shrink-0">
-        当前文风：{{ boundStyleName }} · AI 生成将按此文风代笔
-      </p>
-      <p class="text-xs text-accent mb-2 shrink-0">
-        排版模板：{{ boundLayoutTemplate.name }} · {{ boundLayoutTemplate.description }} · 复制正文时样式可粘贴到公众号等平台
-      </p>
-      <p v-if="boundPersonaHint" class="text-xs text-secondary mb-2 shrink-0">
-        创作人设：{{ boundPersonaHint }} · AI 生成将代入此人设
-      </p>
-      <p v-else-if="showMissingPersonaHint" class="text-xs text-base-content/45 mb-2 shrink-0">
-        未配置创作人设，可在设置 → 运营配置中为对应平台填写
-      </p>
+      <div
+        class="flex flex-wrap items-center gap-x-2 gap-y-1 mb-2 shrink-0 text-xs text-base-content/55"
+        :title="editorContextTitle"
+      >
+        <span v-if="boundStyleName" class="inline-flex items-center gap-0.5 max-w-[9rem] truncate">
+          <span class="text-primary/60 shrink-0">文风</span>
+          <span class="truncate">{{ boundStyleName }}</span>
+        </span>
+        <span v-if="boundStyleName" class="text-base-content/20">·</span>
+        <span class="inline-flex items-center gap-0.5 max-w-[9rem] truncate">
+          <span class="text-accent/60 shrink-0">排版</span>
+          <span class="truncate">{{ boundLayoutTemplate.name }}</span>
+        </span>
+        <template v-if="boundPersonaHint">
+          <span class="text-base-content/20">·</span>
+          <span class="inline-flex items-center gap-0.5 max-w-[10rem] truncate">
+            <span class="text-secondary/60 shrink-0">人设</span>
+            <span class="truncate">{{ boundPersonaShort }}</span>
+          </span>
+        </template>
+        <span v-else-if="showMissingPersonaHint" class="text-base-content/40">人设未配置</span>
+        <template v-if="targetWordCount">
+          <span class="text-base-content/20">·</span>
+          <span class="inline-flex items-center gap-0.5">
+            <span class="text-base-content/45 shrink-0">目标</span>
+            <span>{{ targetWordCount }} 字</span>
+          </span>
+        </template>
+      </div>
       <RichTextEditor
         v-model="body"
         class="flex-1 min-h-[480px]"
@@ -413,7 +481,18 @@ onUnmounted(() => {
         :comments="editorComments"
         @update:comments="editorComments = $event"
         @ai-rewrite="onEditorAiRewrite"
-      />
+      >
+        <template #toolbar-extra>
+          <button
+            type="button"
+            class="btn btn-xs"
+            title="移除文中所有破折号（——、—）"
+            @click="removeEmDashes"
+          >
+            去破折号
+          </button>
+        </template>
+      </RichTextEditor>
       <p v-if="!hasModel" class="text-xs text-warning mt-2">请先在设置 → AI 服务中配置 API Key</p>
     </div>
   </div>

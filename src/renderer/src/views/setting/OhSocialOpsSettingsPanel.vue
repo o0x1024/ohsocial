@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import type { PlatformAccount } from '../../../../shared/types/platform-account'
 
 const emit = defineEmits<{ toast: [type: 'success' | 'error' | 'info', message: string] }>()
@@ -39,6 +39,22 @@ const skillForm = ref({ skillId: '', name: '', content: '' })
 const saving = ref(false)
 const newPlatformName = ref('')
 const addingPlatform = ref(false)
+const activePlatform = ref('')
+
+const activeAccount = computed(() =>
+  platformAccounts.value.find(a => a.platform === activePlatform.value)
+)
+
+function platformTabLabel(platform: string): string {
+  const form = accountForm.value[platform]
+  const acc = platformAccounts.value.find(a => a.platform === platform)
+  return form?.displayName?.trim() || acc?.displayName || platform
+}
+
+function ensureActivePlatform() {
+  if (platformAccounts.value.some(a => a.platform === activePlatform.value)) return
+  activePlatform.value = platformAccounts.value[0]?.platform ?? ''
+}
 
 function syncFormFromAccounts(accounts: PlatformAccount[]) {
   const next: Record<string, AccountFields> = {}
@@ -61,6 +77,7 @@ function syncFormFromAccounts(accounts: PlatformAccount[]) {
 async function loadAccounts() {
   platformAccounts.value = (await window.ohsocial.invoke('account:list')) as PlatformAccount[]
   syncFormFromAccounts(platformAccounts.value)
+  ensureActivePlatform()
 }
 
 onMounted(async () => {
@@ -83,8 +100,13 @@ async function addPlatform() {
       emit('toast', 'error', r.error ?? '添加失败')
       return
     }
+    const addedName = name
     newPlatformName.value = ''
     await loadAccounts()
+    const added = platformAccounts.value.find(
+      a => a.displayName === addedName || a.platform === addedName
+    )
+    activePlatform.value = added?.platform ?? platformAccounts.value.at(-1)?.platform ?? ''
     emit('toast', 'success', '平台已添加')
   } finally {
     addingPlatform.value = false
@@ -152,16 +174,14 @@ async function saveSkill() {
     <span class="loading loading-spinner loading-md text-base-content/40" />
   </div>
   <div v-else class="space-y-4">
-    <div class="mb-2">
-      <h3 class="text-xl font-bold">运营配置</h3>
-      <p class="text-sm text-base-content/50 mt-1">平台账号、内容定位与助手能力</p>
-    </div>
-
-    <div class="card bg-base-100 shadow-sm border border-base-300/60">
-      <div class="card-body p-6 space-y-3">
-        <h4 class="font-semibold text-sm">助手能力</h4>
-        <input v-model="serperKey" type="password" class="input input-bordered w-full" placeholder="Serper API Key（联网搜索）" />
+    <div class="flex items-start justify-between gap-4 mb-2">
+      <div>
+        <h3 class="text-xl font-bold">运营配置</h3>
+        <p class="text-sm text-base-content/50 mt-1">平台账号、内容定位与助手能力</p>
       </div>
+      <button type="button" class="btn btn-primary shrink-0" :disabled="saving" @click="save">
+        {{ saving ? '保存中…' : '保存全部' }}
+      </button>
     </div>
 
     <div class="card bg-base-100 shadow-sm border border-base-300/60">
@@ -194,53 +214,68 @@ async function saveSkill() {
           暂无平台，请先添加
         </p>
 
-        <div
-          v-for="acc in platformAccounts"
-          :key="acc.platform"
-          class="p-4 rounded-box bg-base-200/50 space-y-2"
-        >
-          <div class="flex gap-2 items-center flex-wrap">
-            <input
-              v-model="accountForm[acc.platform].displayName"
-              class="input input-bordered input-sm flex-1 min-w-[8rem]"
-              placeholder="平台名称"
-            />
-            <input
-              v-model="accountForm[acc.platform].accountName"
-              class="input input-bordered input-sm flex-1 min-w-[8rem]"
-              placeholder="账号名称"
-            />
+        <template v-else>
+          <div role="tablist" class="tabs tabs-boxed w-full flex-wrap h-auto gap-1">
             <button
+              v-for="acc in platformAccounts"
+              :key="acc.platform"
               type="button"
-              class="btn btn-sm btn-ghost text-error shrink-0"
-              @click="removePlatform(acc.platform)"
+              role="tab"
+              class="tab tab-sm"
+              :class="{ 'tab-active': activePlatform === acc.platform }"
+              @click="activePlatform = acc.platform"
             >
-              删除
+              {{ platformTabLabel(acc.platform) }}
             </button>
           </div>
-          <input
-            v-model="accountForm[acc.platform].contentDomain"
-            class="input input-bordered input-sm w-full"
-            placeholder="内容领域，如旅游攻略 / 网络安全"
-          />
-          <input
-            v-model="accountForm[acc.platform].contentKeywordsText"
-            class="input input-bordered input-sm w-full"
-            placeholder="领域关键词，用顿号分隔"
-          />
-          <textarea
-            v-model="accountForm[acc.platform].contentBrief"
-            class="textarea textarea-bordered textarea-sm w-full"
-            rows="2"
-            placeholder="运营方向说明（选填）"
-          />
-          <textarea
-            v-model="accountForm[acc.platform].authorPersona"
-            class="textarea textarea-bordered textarea-sm w-full"
-            rows="2"
-            placeholder="创作人设（选填），如：网络安全从业者，用科普口吻向普通读者解释风险，不说教、不堆术语"
-          />
-        </div>
+
+          <div
+            v-if="activeAccount && accountForm[activePlatform]"
+            class="p-4 rounded-box bg-base-200/50 space-y-3"
+          >
+            <div class="flex gap-2 items-center flex-wrap">
+              <input
+                v-model="accountForm[activePlatform].displayName"
+                class="input input-bordered input-sm flex-1 min-w-[8rem]"
+                placeholder="平台名称"
+              />
+              <input
+                v-model="accountForm[activePlatform].accountName"
+                class="input input-bordered input-sm flex-1 min-w-[8rem]"
+                placeholder="账号名称"
+              />
+              <button
+                type="button"
+                class="btn btn-sm btn-ghost text-error shrink-0"
+                @click="removePlatform(activePlatform)"
+              >
+                删除平台
+              </button>
+            </div>
+            <input
+              v-model="accountForm[activePlatform].contentDomain"
+              class="input input-bordered input-sm w-full"
+              placeholder="内容领域，如旅游攻略 / 网络安全"
+            />
+            <input
+              v-model="accountForm[activePlatform].contentKeywordsText"
+              class="input input-bordered input-sm w-full"
+              placeholder="领域关键词，用顿号分隔"
+            />
+            <textarea
+              v-model="accountForm[activePlatform].contentBrief"
+              class="textarea textarea-bordered textarea-sm w-full"
+              rows="2"
+              placeholder="运营方向说明（选填）"
+            />
+            <textarea
+              v-model="accountForm[activePlatform].authorPersona"
+              class="textarea textarea-bordered textarea-sm w-full"
+              rows="2"
+              placeholder="创作人设（选填），如：网络安全从业者，用科普口吻向普通读者解释风险，不说教、不堆术语"
+            />
+          </div>
+        </template>
       </div>
     </div>
 
@@ -258,6 +293,11 @@ async function saveSkill() {
       </div>
     </div>
 
-    <button type="button" class="btn btn-primary" :disabled="saving" @click="save">保存全部</button>
+    <div class="card bg-base-100 shadow-sm border border-base-300/60">
+      <div class="card-body p-6 space-y-3">
+        <h4 class="font-semibold text-sm">助手能力</h4>
+        <input v-model="serperKey" type="password" class="input input-bordered w-full" placeholder="Serper API Key（联网搜索）" />
+      </div>
+    </div>
   </div>
 </template>

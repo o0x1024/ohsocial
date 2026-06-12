@@ -60,7 +60,7 @@ export function registerContentHandlers(): void {
     if (!topic) return { success: false, error: '选题不存在' }
     const existing = contentDAO.getOriginByTopicId(topicId)
     if (existing) {
-      if (topic.status !== 'writing' && topic.status !== 'done') {
+      if (topic.status !== 'writing') {
         topicDAO.update(topicId, { status: 'writing' })
       }
       return { success: true, content: existing, created: false }
@@ -169,6 +169,8 @@ export function registerContentHandlers(): void {
           typeof content.meta?.writingStyleId === 'number' ? content.meta.writingStyleId : null
         const layoutTemplateId =
           typeof content.meta?.layoutTemplateId === 'string' ? content.meta.layoutTemplateId : null
+        const targetWordCount =
+          typeof content.meta?.targetWordCount === 'number' ? content.meta.targetWordCount : null
         const platformIds = platformIdsForContent(content)
         const result = await modelService.generateWriting(
           content.title,
@@ -176,7 +178,8 @@ export function registerContentHandlers(): void {
           streamCallbacks(progress, { contentId, mode: 'generate' }),
           writingStyleId,
           platformIds,
-          layoutTemplateId
+          layoutTemplateId,
+          targetWordCount
         )
         return {
           success: result.success,
